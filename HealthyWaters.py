@@ -196,19 +196,19 @@ def GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_Catch
 
 def main():
    # Set up variables
-   arcpy.env.workspace = r'E:\projects\healthy_waters\inputs\watersheds\hw_watersheds.gdb'
-   in_hydroNet = r'E:\projects\healthy_waters\inputs\watersheds\VA_HydroNet.gdb\HydroNet\HydroNet_ND'
-   in_Points = r'E:\projects\healthy_waters\inputs\watersheds\hw_watersheds.gdb\INSTAR_Samples'
-   in_Catchment = r'E:\projects\healthy_waters\inputs\watersheds\Proc_NHDPlus_HR.gdb\NHDPlusCatchment_Merge_valam'
+   arcpy.env.workspace = r'E:\git\HealthyWaters\inputs\watersheds\hw_watersheds.gdb'
+   in_hydroNet = r'E:\git\HealthyWaters\inputs\watersheds\VA_HydroNet.gdb\HydroNet\HydroNet_ND'
+   in_Points = r'E:\git\HealthyWaters\inputs\watersheds\hw_watersheds.gdb\INSTAR_Samples'
+   in_Catchment = r'E:\git\HealthyWaters\inputs\watersheds\Proc_NHDPlus_HR.gdb\NHDPlusCatchment_Merge_valam'
 
    # distances to loop over, in miles
-   miles = [1]
+   miles = [1, 2, 3, 4, 5]
 
    # loop over distances
    for mi in miles:
       up_Dist = mi * 1609.34
-      out_Lines = 'hw_Flowline_' + str(mi) + 'mile_test'
-      out_CatchArea = 'hw_CatchArea_' + str(mi) + 'mile_test'
+      out_Lines = 'hw_Flowline_' + str(mi) + 'mile'
+      out_CatchArea = 'hw_CatchArea_' + str(mi) + 'mile'
       in_lyrUpTrace = MakeServiceLayer_hw(in_hydroNet, up_Dist)
       GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_CatchArea)
 
