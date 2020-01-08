@@ -10,34 +10,44 @@
 
 # Usage Tips:
 
-# Dependencies:
-# This set of functions will not work if the hydro network is not set up properly! The network geodatabase VA_HydroNet.gdb has been set up manually, not programmatically.
+# Dependencies: This set of functions will not work if the hydro network is not set up properly! The network
+# geodatabase VA_HydroNet.gdb has been set up manually, not programmatically.
 
 # The Network Analyst extension is required for some functions, which will fail if the license is unavailable.
 
-# Note that the restrictions (contained in "r" variable below) for traversing the network must have been defined in the HydroNet itself (manually).
+# Note that the restrictions (contained in "r" variable below) for traversing the network must have been defined
+# in the HydroNet itself (manually).
+
 # If any additional restrictions are added, the HydroNet must be rebuilt or they will not take effect.
 # I originally set a restriction of NoEphemeralOrIntermittent, but on testing I discovered that this eliminated
 # some stream segments that actually might be needed. I set the restriction to NoEphemeral instead. We may find
 # that we need to remove the NoEphemeral restriction as well, or that users will need to edit attributes of the
 # NHDFlowline segments on a case-by-case basis. I also previously included NoConnectors as a restriction,
-# but in some cases I noticed with INSTAR data, it seems necessary to allow connectors, so I've removed that restriction. (-krh)
+# but in some cases I noticed with INSTAR data, it seems necessary to allow connectors, so I've removed that
+# restriction. (-krh)
 # The NoCanalDitch exclusion was also removed, after finding some INSTAR sites on this type of flowline, and with
 # CanalDitch immediately upstream.
 
-# Syntax:  
-# 
+# Syntax:
+# # Set up a network analysis layer, specifying upstream distance desired (in map units)
+# in_lyrUpTrace = MakeServiceLayer_hw(in_hydroNet, up_Dist = 1000, dams=False)
+#
+# Create feature classes for upstream flowline network and catchments
+# GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_CatchArea)
 # ----------------------------------------------------------------------------------------
 
 # Import modules
 import Helper
 from Helper import *
 
-def MakeServiceLayer_hw(in_hydroNet, up_Dist):
-   '''Creates a service layer needed to grab stream segments a specified distance upstream of network points. This function only needs to be run once for each distance specified. After that, the output layers can be reused repeatedly.
+def MakeServiceLayer_hw(in_hydroNet, up_Dist, dams=True):
+   '''Creates a service layer needed to grab stream segments a specified distance upstream of network points.
+   This function only needs to be run once for each distance specified. After that, the output layers can be reused
+   repeatedly.
    Parameters:
    - in_hydroNet = Input hydrological network dataset (e.g., VA_HydroNet.gdb\HydroNet\HydroNet_ND)
    - up_Dist = The distance (in map units) to traverse upstream from a point along the network
+   - dams = Whether dams should be included as barriers in the network analysis layer
    '''
    arcpy.CheckOutExtension("Network")
    
@@ -47,16 +57,13 @@ def MakeServiceLayer_hw(in_hydroNet, up_Dist):
    catPath = os.path.dirname(nwDataset) # This is where hydro layers will be found
    hydroDir = os.path.dirname(catPath)
    hydroDir = os.path.dirname(hydroDir) # This is where output layer files will be saved
-   nwLines = catPath + os.sep + "NHDLine"
-   qry = "FType = 343" # DamWeir only
-   arcpy.MakeFeatureLayer_management (nwLines, "lyr_DamWeir", qry)
-   in_Lines = "lyr_DamWeir"
+
    # Output layer name to reflect the specified upstream distance
    lyrUpTrace = hydroDir + os.sep + "naUpTrace_%s.lyr" %str(int(round(up_Dist)))
    
    # Upstream trace with break at specified distance
    r = "NoPipelines;NoUndergroundConduits;NoEphemeral;NoCoastline"
-   printMsg('Creating upstream and downstream service layers...')
+   printMsg('Creating upstream service layers...')
    restrictions = r + ";" + "FlowUpOnly"
    serviceLayer = arcpy.MakeServiceAreaLayer_na(in_network_dataset=nwDataset,
       out_network_analysis_layer = "naUpTrace", 
@@ -67,7 +74,7 @@ def MakeServiceLayer_hw(in_hydroNet, up_Dist):
       merge = "NO_MERGE", 
       nesting_type = "RINGS", 
       line_type = "TRUE_LINES_WITH_MEASURES", 
-      overlap = "NON_OVERLAP", 
+      overlap = "OVERLAP",
       split = "SPLIT", 
       excluded_source_name = "", 
       accumulate_attribute_name = "Length", 
@@ -79,26 +86,34 @@ def MakeServiceLayer_hw(in_hydroNet, up_Dist):
       hierarchy = "NO_HIERARCHY", 
       time_of_day = "")
    
-   # Add dam barriers to service layer and save
-   printMsg('Adding dam barriers to service layer...')
-   barriers = arcpy.AddLocations_na(in_network_analysis_layer = "naUpTrace", 
-      sub_layer = "Line Barriers", 
-      in_table = in_Lines, 
-      field_mappings = "Name Permanent_Identifier #", 
-      search_tolerance = "100 Meters", 
-      sort_field = "", 
-      search_criteria = "NHDFlowline SHAPE_MIDDLE_END;HydroNet_ND_Junctions NONE", 
-      match_type = "MATCH_TO_CLOSEST", 
-      append = "CLEAR", 
-      snap_to_position_along_network = "SNAP", 
-      snap_offset = "0 Meters", 
-      exclude_restricted_elements = "INCLUDE", 
-      search_query = "NHDFlowline #;HydroNet_ND_Junctions #")
-      
+   if dams:
+      nwLines = catPath + os.sep + "NHDLine"
+      qry = "FType = 343"  # DamWeir only
+      arcpy.MakeFeatureLayer_management(nwLines, "lyr_DamWeir", qry)
+      in_Lines = "lyr_DamWeir"
+
+      # Add dam barriers to service layer
+      printMsg('Adding dam barriers to service layer...')
+      barriers = arcpy.AddLocations_na(in_network_analysis_layer = "naUpTrace",
+         sub_layer = "Line Barriers",
+         in_table = in_Lines,
+         field_mappings = "Name Permanent_Identifier #",
+         search_tolerance = "#",
+         sort_field = "",
+         search_criteria = "NHDFlowline SHAPE_MIDDLE_END;HydroNet_ND_Junctions NONE",
+         # match_type = "#",
+         append = "CLEAR",
+         # snap_to_position_along_network = "#",
+         # snap_offset = "#",
+         # exclude_restricted_elements = "#",
+         search_query = "NHDFlowline #;HydroNet_ND_Junctions #")
+
+   # save
    printMsg('Saving service layer to %s...' %lyrUpTrace)      
    arcpy.SaveToLayerFile_management("naUpTrace", lyrUpTrace) 
 
-   del barriers
+   if dams:
+      del barriers
    del serviceLayer
    
    arcpy.CheckInExtension("Network")
@@ -107,14 +122,16 @@ def MakeServiceLayer_hw(in_hydroNet, up_Dist):
 
 
 def GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_CatchArea, out_Scratch = arcpy.env.scratchGDB):
-   '''Loads point(s), solves the upstream service layer to get lines, grabs catchments intersecting lines, and dissolves them.
+   '''Loads point(s), solves the upstream service layer to get lines, grabs catchments intersecting lines.
+    Outputs are two feature classes (dissolved lines and catchments, one feature per input point).
    Parameters:
    - in_Points = Input feature class representing sample point(s) along network
    - in_lyrUpTrace = Network Analyst service layer set up to run upstream
    - in_Catchment = Catchment polygons for flowlines used in the network
    - out_Lines = Output lines representing upstream flow to a specified distance from point
    - out_CatchArea = Output polygons covering catchments intersecting output lines
-   - out_Scratch = Geodatabase to contain intermediate outputs'''
+   - out_Scratch = Geodatabase to contain intermediate outputs
+   '''
    
    arcpy.CheckOutExtension("Network")
 
@@ -196,10 +213,11 @@ def GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_Catch
 
 def main():
    # Set up variables
-   arcpy.env.workspace = r'E:\git\HealthyWaters\inputs\watersheds\hw_watersheds.gdb'
+   arcpy.env.workspace = r'E:\git\HealthyWaters\inputs\watersheds\hw_watershed_withdams.gdb'
    in_hydroNet = r'E:\git\HealthyWaters\inputs\watersheds\VA_HydroNet.gdb\HydroNet\HydroNet_ND'
-   in_Points = r'E:\git\HealthyWaters\inputs\watersheds\hw_watersheds.gdb\INSTAR_Samples'
+   in_Points = r'E:\git\HealthyWaters\inputs\HW_working.gdb\INSTAR_Samples'
    in_Catchment = r'E:\git\HealthyWaters\inputs\watersheds\Proc_NHDPlus_HR.gdb\NHDPlusCatchment_Merge_valam'
+   dams = True  # whether to include dams as barriers or not
 
    # distances to loop over, in miles
    miles = [1, 2, 3, 4, 5]
@@ -209,7 +227,7 @@ def main():
       up_Dist = mi * 1609.34
       out_Lines = 'hw_Flowline_' + str(mi) + 'mile'
       out_CatchArea = 'hw_CatchArea_' + str(mi) + 'mile'
-      in_lyrUpTrace = MakeServiceLayer_hw(in_hydroNet, up_Dist)
+      in_lyrUpTrace = MakeServiceLayer_hw(in_hydroNet, up_Dist, dams)
       GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_CatchArea)
 
 
