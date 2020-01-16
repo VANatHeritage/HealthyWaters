@@ -2,7 +2,7 @@
 # HealthyWaters.py
 # Version:  ArcGIS 10.3.1 / Python 2.7.8
 # Creation Date: 2020-01-06
-# Last Edit: 2020-01-06
+# Last Edit: 2020-01-16
 # Creator(s):  Kirsten R. Hazler/David Bucklin
 
 # Summary:
@@ -135,7 +135,7 @@ def GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_Catch
    
    arcpy.CheckOutExtension("Network")
 
-   # get Points ID field info
+   # get point field info
    ptid = str([f.name for f in arcpy.Describe(in_Points).Fields][0])
    ptid_join = ptid + '_in_Points'
 
@@ -181,29 +181,53 @@ def GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_Catch
    arcpy.RepairGeometry_management(upLines, "DELETE_NULL")
    printMsg('Saving updated %s service layer to %s...' %(in_upTrace, in_lyrUpTrace))
    arcpy.SaveToLayerFile_management(in_upTrace, in_lyrUpTrace)
-   
-   # Dissolve lines
-   printMsg('Dissolving service areas...')
-   lines_diss = arcpy.Dissolve_management(upLines, out_Lines, dissolve_field="FacilityID")
 
-   # join original points ID field to lines dataset
+   # Add ID field from original points to facilities
    joinPt = arcpy.CopyFeatures_management(arcpy.mapping.ListLayers(in_upTrace, "Facilities")[0],
                                           out_Scratch + os.sep + "in_Points")
    arcpy.AddField_management(joinPt, ptid_join, "LONG")
    arcpy.CalculateField_management(joinPt, ptid_join, "!Name!", "PYTHON")
-   arcpy.JoinField_management(lines_diss, "FacilityID", joinPt, "ObjectID", ptid_join)
+
+   # output lines datasets, with original points ID attached
+   printMsg('Dissolving line networks...')
+   arcpy.JoinField_management(upLines, "FacilityID", joinPt, "ObjectID", ptid_join)
+   arcpy.CopyFeatures_management(upLines, out_Lines + '_full')
+   lines_diss = arcpy.Dissolve_management(upLines, out_Lines, dissolve_field=ptid_join)
 
    # get/dissolve catchments associated with lines
-   catch_all = arcpy.SpatialJoin_analysis(in_Catchment, lines_diss,
-                              out_feature_class= out_Scratch + os.sep + "catch_all",
+   printMsg('Getting and dissolving catchments...')
+   cat_lyr = arcpy.MakeFeatureLayer_management(in_Catchment)
+   arcpy.SelectLayerByLocation_management(cat_lyr, "INTERSECT", lines_diss)
+   catch_all = arcpy.SpatialJoin_analysis(cat_lyr, lines_diss,
+                              out_feature_class=out_CatchArea + '_full',
                               join_operation="JOIN_ONE_TO_MANY",
                               join_type="KEEP_COMMON",
                               match_option="INTERSECT")
+   del cat_lyr
    arcpy.Dissolve_management(catch_all, out_CatchArea, dissolve_field=ptid_join)
+
+   # get unaasociated catchments
+   assoc = ','.join([str(f[0]) for f in arcpy.da.SearchCursor(out_CatchArea, ptid_join)])
+   query = ptid + " NOT IN (" + assoc + ")"
+   pt_lyr = arcpy.MakeFeatureLayer_management(in_Points, where_clause=query)
+
+   if (int(arcpy.GetCount_management(pt_lyr)[0]) > 0):
+      printMsg('Adding catchments for unassociated points...')
+      arcpy.AddField_management(pt_lyr, ptid_join, "LONG")
+      arcpy.CalculateField_management(pt_lyr, ptid_join, '!' + ptid + '!', "PYTHON")
+      cat_lyr = arcpy.MakeFeatureLayer_management(in_Catchment)
+      arcpy.SelectLayerByLocation_management(cat_lyr, "INTERSECT", pt_lyr)
+      arcpy.SpatialJoin_analysis(cat_lyr, pt_lyr, 'catUnassoc', join_operation="JOIN_ONE_TO_MANY",
+                              join_type="KEEP_COMMON", match_option="INTERSECT")
+      arcpy.Append_management('catUnassoc', out_CatchArea, "NO_TEST")
+      arcpy.Append_management('catUnassoc', out_CatchArea + '_full', "NO_TEST")
+      arcpy.Delete_management('catUnassoc')
+      arcpy.DeleteField_management(pt_lyr, ptid_join)
+      del pt_lyr, cat_lyr
 
    # timestamp
    t1 = datetime.now()
-   ds = GetElapsedTime (t0, t1)
+   ds = GetElapsedTime(t0, t1)
    printMsg('Completed function. Time elapsed: %s' % ds)
 
    arcpy.CheckInExtension("Network")
@@ -213,14 +237,17 @@ def GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_Catch
 
 def main():
    # Set up variables
-   arcpy.env.workspace = r'E:\git\HealthyWaters\inputs\watersheds\hw_watershed_withdams.gdb'
+   arcpy.env.workspace = r'E:\git\HealthyWaters\inputs\watersheds\hw_watershed_nodams_full.gdb'
    in_hydroNet = r'E:\git\HealthyWaters\inputs\watersheds\VA_HydroNet.gdb\HydroNet\HydroNet_ND'
    in_Points = r'E:\git\HealthyWaters\inputs\HW_working.gdb\INSTAR_Samples'
    in_Catchment = r'E:\git\HealthyWaters\inputs\watersheds\Proc_NHDPlus_HR.gdb\NHDPlusCatchment_Merge_valam'
-   dams = True  # whether to include dams as barriers or not
+   dams = False  # whether to include dams as barriers or not
+
+   # copy points to geodatabase
+   in_Points = arcpy.CopyFeatures_management(in_Points, os.path.basename(in_Points).replace('.shp', ''))
 
    # distances to loop over, in miles
-   miles = [1, 2, 3, 4, 5]
+   miles = [1, 2, 3, 4, 5, 330]  # 330 covers entire watershed
 
    # loop over distances
    for mi in miles:
@@ -229,7 +256,6 @@ def main():
       out_CatchArea = 'hw_CatchArea_' + str(mi) + 'mile'
       in_lyrUpTrace = MakeServiceLayer_hw(in_hydroNet, up_Dist, dams)
       GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_CatchArea)
-
 
 if __name__ == '__main__':
    main()
