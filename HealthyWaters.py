@@ -196,7 +196,7 @@ def GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_Catch
 
    # get/dissolve catchments associated with lines
    printMsg('Getting and dissolving catchments...')
-   cat_lyr = arcpy.MakeFeatureLayer_management(in_Catchment)
+   cat_lyr = arcpy.MakeFeatureLayer_management(in_Catchment, where_clause="SourceFC <> 'NHDPlusSink'")
    arcpy.SelectLayerByLocation_management(cat_lyr, "INTERSECT", lines_diss)
    catch_all = arcpy.SpatialJoin_analysis(cat_lyr, lines_diss,
                               out_feature_class=out_CatchArea + '_full',
@@ -237,7 +237,7 @@ def GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_Catch
 
 def main():
    # Set up variables
-   arcpy.env.workspace = r'E:\git\HealthyWaters\inputs\watersheds\hw_watershed_nodams_full.gdb'
+   arcpy.env.workspace = r'E:\git\HealthyWaters\inputs\watersheds\hw_watershed_nodams.gdb'
    in_hydroNet = r'E:\git\HealthyWaters\inputs\watersheds\VA_HydroNet.gdb\HydroNet\HydroNet_ND'
    in_Points = r'E:\git\HealthyWaters\inputs\HW_working.gdb\INSTAR_Samples'
    in_Catchment = r'E:\git\HealthyWaters\inputs\watersheds\Proc_NHDPlus_HR.gdb\NHDPlusCatchment_Merge_valam'
