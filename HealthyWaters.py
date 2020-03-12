@@ -135,9 +135,15 @@ def GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_Catch
    
    arcpy.CheckOutExtension("Network")
 
-   # get point field info
+   # get point field info, add new field storing ID
    ptid = str([f.name for f in arcpy.Describe(in_Points).Fields][0])
    ptid_join = ptid + '_in_Points'
+   if ptid_join not in [str(f.name) for f in arcpy.Describe(in_Points).Fields]:
+      print('Adding new field `' + ptid_join + '` to points as a unique ID...')
+      arcpy.AddField_management(in_Points, ptid_join, "LONG")
+      arcpy.CalculateField_management(in_Points, ptid_join, '!'+ptid+'!', "PYTHON")
+   else:
+      print('Using existing field `' + ptid_join + '` as a unique point ID...')
 
    # timestamp
    t0 = datetime.now()
@@ -155,8 +161,8 @@ def GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_Catch
    naPoints = arcpy.AddLocations_na(in_network_analysis_layer = in_upTrace, 
       sub_layer = "Facilities", 
       in_table = in_Points, 
-      field_mappings = "Name " + ptid + " #",
-      search_tolerance = "500 Meters", 
+      field_mappings = "Name " + ptid_join + " #",
+      search_tolerance = "500 Meters",
       sort_field = "", 
       search_criteria = "NHDFlowline SHAPE;HydroNet_ND_Junctions NONE", 
       match_type = "MATCH_TO_CLOSEST", 
@@ -189,6 +195,7 @@ def GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_Catch
    arcpy.CalculateField_management(joinPt, ptid_join, "!Name!", "PYTHON")
 
    # output lines datasets, with original points ID attached
+   # Note: Facilty ID in Lines == ObjectID in Facilities. The join adds the unique point ID field to Lines.
    printMsg('Dissolving line networks...')
    arcpy.JoinField_management(upLines, "FacilityID", joinPt, "ObjectID", ptid_join)
    arcpy.CopyFeatures_management(upLines, out_Lines + '_full')
@@ -222,7 +229,6 @@ def GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_Catch
       arcpy.Append_management('catUnassoc', out_CatchArea, "NO_TEST")
       arcpy.Append_management('catUnassoc', out_CatchArea + '_full', "NO_TEST")
       arcpy.Delete_management('catUnassoc')
-      arcpy.DeleteField_management(pt_lyr, ptid_join)
       del pt_lyr, cat_lyr
 
    # timestamp
@@ -237,14 +243,16 @@ def GetCatchArea_hw(in_Points, in_lyrUpTrace, in_Catchment, out_Lines, out_Catch
 
 def main():
    # Set up variables
+   # arcpy.CreateFileGDB_management(r'E:\git\HealthyWaters\inputs\watersheds', 'hw_watershed_nodams.gdb')
    arcpy.env.workspace = r'E:\git\HealthyWaters\inputs\watersheds\hw_watershed_nodams.gdb'
    in_hydroNet = r'E:\git\HealthyWaters\inputs\watersheds\VA_HydroNet.gdb\HydroNet\HydroNet_ND'
-   in_Points = r'E:\git\HealthyWaters\inputs\HW_working.gdb\INSTAR_Samples'
+   in_Points0 = r'E:\git\HealthyWaters\inputs\HW_working.gdb\INSTAR_Samples'
    in_Catchment = r'E:\git\HealthyWaters\inputs\watersheds\Proc_NHDPlus_HR.gdb\NHDPlusCatchment_Merge_valam'
    dams = False  # whether to include dams as barriers or not
 
    # copy points to geodatabase
-   in_Points = arcpy.CopyFeatures_management(in_Points, os.path.basename(in_Points).replace('.shp', ''))
+   in_Points = os.path.basename(in_Points0).replace('.shp', '')
+   arcpy.CopyFeatures_management(in_Points0, in_Points)
 
    # distances to loop over, in miles
    miles = [1, 2, 3, 4, 5, 330]  # 330 covers entire watershed
