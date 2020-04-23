@@ -14,10 +14,10 @@
 import os, sys, traceback, numpy
 try:
    arcpy
-   print "Arcpy is already loaded"
+   print("Arcpy is already loaded")
 except:
-   print "Initiating arcpy, which takes longer than it should..."
-   import arcpy   
+   print("Initiating arcpy, which takes longer than it should...")
+   import arcpy
 
 from datetime import datetime as datetime   
    
@@ -393,3 +393,8 @@ def ProjectToMatch(in_Feats, in_Template, out_Feats):
          geoTrans = transList[0]
       arcpy.Project_management (in_Feats, out_Feats, srTemplate, geoTrans)
    return out_Feats
+
+
+def DateStamp():
+   import time
+   return time.strftime('%Y%m%d')
