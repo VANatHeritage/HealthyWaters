@@ -15,7 +15,7 @@
 
 # The Network Analyst extension is required for some functions, which will fail if the license is unavailable.
 
-# Note that the restrictions (contained in "r" variable below) for traversing the network must have been defined
+# Note that the restrictions (contained in "restrictions" variable below) for traversing the network must have been defined
 # in the HydroNet itself (manually).
 
 # If any additional restrictions are added, the HydroNet must be rebuilt or they will not take effect.
@@ -40,6 +40,7 @@
 # import Helper
 from Helper import *
 
+
 def MakeServiceLayer_hw(in_hydroNet, up_Dist, dams=True):
    '''Creates a service layer needed to grab stream segments a specified distance upstream of network points.
    This function only needs to be run once for each distance specified. After that, the output layers can be reused
@@ -50,7 +51,7 @@ def MakeServiceLayer_hw(in_hydroNet, up_Dist, dams=True):
    - dams = Whether dams should be included as barriers in the network analysis layer
    '''
    arcpy.CheckOutExtension("Network")
-   
+
    # Set up some variables
    descHydro = arcpy.Describe(in_hydroNet)
    nwDataset = descHydro.catalogPath
@@ -58,33 +59,45 @@ def MakeServiceLayer_hw(in_hydroNet, up_Dist, dams=True):
    hydroDir = os.path.dirname(os.path.dirname(catPath))  # This is where output layer files will be saved
 
    # Output layer name to reflect the specified upstream distance
-   lyrUpTrace = hydroDir + os.sep + "naUpTrace_%s.lyr" %str(int(round(up_Dist)))
-   
+   lyrUpTrace = hydroDir + os.sep + "naUpTrace_%s.lyr" % str(int(round(up_Dist)))
+
    # Upstream trace with break at specified distance
-   r = "NoPipelines;NoUndergroundConduits;NoEphemeral;NoCoastline"
+   restrictions = ["NoPipelines", "NoUndergroundConduits", "NoEphemeral", "NoCoastline"]
    printMsg('Creating upstream service layers...')
-   restrictions = r + ";" + "FlowUpOnly"
-   serviceLayer = arcpy.MakeServiceAreaLayer_na(in_network_dataset=nwDataset,
-      out_network_analysis_layer = "naUpTrace", 
-      impedance_attribute = "Length", 
-      travel_from_to = "TRAVEL_FROM", 
-      default_break_values = up_Dist, 
-      polygon_type = "NO_POLYS", 
-      merge = "NO_MERGE", 
-      nesting_type = "RINGS", 
-      line_type = "TRUE_LINES_WITH_MEASURES", 
-      overlap = "OVERLAP",
-      split = "SPLIT", 
-      excluded_source_name = "", 
-      accumulate_attribute_name = "Length", 
-      UTurn_policy = "ALLOW_UTURNS", 
-      restriction_attribute_name = restrictions, 
-      polygon_trim = "TRIM_POLYS", 
-      poly_trim_value = "100 Meters", 
-      lines_source_fields = "LINES_SOURCE_FIELDS", 
-      hierarchy = "NO_HIERARCHY", 
-      time_of_day = "")
-   
+   restrictions.append("FlowUpOnly")
+
+   if pyvers < 3:
+      # create service area line layer for ArcMap
+      serviceLayer = arcpy.MakeServiceAreaLayer_na(in_network_dataset=nwDataset,
+                                                   out_network_analysis_layer="naUpTrace",
+                                                   impedance_attribute="Length",
+                                                   travel_from_to="TRAVEL_FROM",
+                                                   default_break_values=up_Dist,
+                                                   polygon_type="NO_POLYS",
+                                                   merge="NO_MERGE",
+                                                   nesting_type="RINGS",
+                                                   line_type="TRUE_LINES_WITH_MEASURES",
+                                                   overlap="OVERLAP",
+                                                   split="SPLIT",
+                                                   excluded_source_name="",
+                                                   accumulate_attribute_name="Length",
+                                                   UTurn_policy="ALLOW_UTURNS",
+                                                   restriction_attribute_name=restrictions,
+                                                   polygon_trim="TRIM_POLYS",
+                                                   poly_trim_value="100 Meters",
+                                                   lines_source_fields="LINES_SOURCE_FIELDS",
+                                                   hierarchy="NO_HIERARCHY",
+                                                   time_of_day="")
+   else:
+      # ArcGIS Pro: old MakeServiceAreaLayer call would work, but is deprecated, see:
+      # (https://pro.arcgis.com/en/pro-app/tool-reference/network-analyst/make-service-area-layer.htm)
+      tm = arcpy.na.TravelMode(arcpy.na.GetTravelModes(nwDataset)["Standard"])
+      tm.name = "setRestrict"
+      # Note: This removes all travel restrictions along network
+      tm.restrictions = restrictions
+      serviceLayer = arcpy.na.MakeServiceAreaAnalysisLayer(nwDataset, "naUpTrace", tm, "FROM_FACILITIES",
+                                                           up_Dist, output_type="LINES",
+                                                           geometry_at_overlaps="OVERLAP")
    if dams:
       nwLines = catPath + os.sep + "NHDLine"
       qry = "FType = 343"  # DamWeir only
@@ -93,141 +106,42 @@ def MakeServiceLayer_hw(in_hydroNet, up_Dist, dams=True):
 
       # Add dam barriers to service layer
       printMsg('Adding dam barriers to service layer...')
-      barriers = arcpy.AddLocations_na(in_network_analysis_layer = "naUpTrace",
-         sub_layer = "Line Barriers",
-         in_table = in_Lines,
-         field_mappings = "Name Permanent_Identifier #",
-         search_tolerance = "#",
-         sort_field = "",
-         search_criteria = "NHDFlowline SHAPE_MIDDLE_END;HydroNet_ND_Junctions NONE",
-         # match_type = "#",
-         append = "CLEAR",
-         # snap_to_position_along_network = "#",
-         # snap_offset = "#",
-         # exclude_restricted_elements = "#",
-         search_query = "NHDFlowline #;HydroNet_ND_Junctions #")
+      barriers = arcpy.AddLocations_na(in_network_analysis_layer="naUpTrace",
+                                       sub_layer="Line Barriers",
+                                       in_table=in_Lines,
+                                       field_mappings="Name Permanent_Identifier #",
+                                       search_tolerance="#",
+                                       sort_field="",
+                                       search_criteria="NHDFlowline SHAPE_MIDDLE_END;HydroNet_ND_Junctions NONE",
+                                       # match_type = "#",
+                                       append="CLEAR",
+                                       # snap_to_position_along_network = "#",
+                                       # snap_offset = "#",
+                                       # exclude_restricted_elements = "#",
+                                       search_query="NHDFlowline #;HydroNet_ND_Junctions #")
 
    # save
-   printMsg('Saving service layer to %s...' %lyrUpTrace)      
-   arcpy.SaveToLayerFile_management("naUpTrace", lyrUpTrace) 
+   printMsg('Saving service layer to %s...' % lyrUpTrace)
+   arcpy.SaveToLayerFile_management("naUpTrace", lyrUpTrace)
 
    if dams:
       del barriers
    del serviceLayer
-   
+
    arcpy.CheckInExtension("Network")
-   
+
    return lyrUpTrace
 
 
-def GetNetworks_hw(in_Points, in_lyrUpTrace, in_hydroNet, out_Lines, in_Catchment = None, out_Scratch = arcpy.env.scratchGDB):
-   '''Loads point(s), solves the upstream service layer to get lines, grabs catchments intersecting lines.
-    Outputs are two feature classes (dissolved lines and catchments, one feature per input point).
-   Parameters:
-   - in_Points = Input feature class representing sample point(s) along network
-   - in_lyrUpTrace = Network Analyst service layer set up to run upstream
-   - in_hydroNet = Hydrological network used to build service layer. Must Contain NHDFlowline feature class
-   - out_Lines = Output lines representing upstream flow to a specified distance from point
-   - in_Catchment = Input catchment polygons layer, matching flowlines from in_hydroNet. Optional: if given, the
-      catchments for the network will be output, using the naming scheme `[out_Lines]_catchArea`.
-   - out_Scratch = Geodatabase to contain intermediate outputs
-   '''
-   
-   arcpy.CheckOutExtension("Network")
-   nhdFlow = os.path.dirname(in_hydroNet) + os.sep + 'NHDFlowline'
-   if not arcpy.Exists(nhdFlow):
-      return 'NHDFlowine file does not exist in network dataset `' + in_hydroNet + '`.'
-
-   # get point field info, add new field storing ID
-   ptid = str([f.name for f in arcpy.Describe(in_Points).Fields][0])
-   ptid_join = ptid + '_in_Points'
-   if ptid_join not in [str(f.name) for f in arcpy.Describe(in_Points).Fields]:
-      print('Adding new field `' + ptid_join + '` to points as a unique ID...')
-      arcpy.AddField_management(in_Points, ptid_join, "LONG")
-      arcpy.CalculateField_management(in_Points, ptid_join, '!'+ptid+'!', "PYTHON")
-   else:
-      print('Using existing field `' + ptid_join + '` as a unique point ID...')
-
-   # timestamp
-   t0 = datetime.now()
-   
-   # Set up some variables
-   if out_Scratch == "in_memory":
-      # recast to save to disk, otherwise there is no OBJECTID field for queries as needed
-      out_Scratch = arcpy.env.scratchGDB
-   printMsg('Casting strings to layer objects...')
-   in_upTrace = arcpy.mapping.Layer(in_lyrUpTrace)
-   upLines = out_Scratch + os.sep + 'upLines'
-  
-   # Load point(s) as facilities into service layer; search distance 50 meters
-   printMsg('Loading points into service layer...')
-   naPoints = arcpy.AddLocations_na(in_network_analysis_layer = in_upTrace, 
-      sub_layer = "Facilities", 
-      in_table = in_Points, 
-      field_mappings = "Name " + ptid_join + " #",
-      search_tolerance = "50 Meters",
-      sort_field = ptid_join,
-      search_criteria = "NHDFlowline SHAPE;HydroNet_ND_Junctions NONE", 
-      match_type = "MATCH_TO_CLOSEST", 
-      append = "CLEAR", 
-      snap_to_position_along_network = "SNAP", 
-      snap_offset = "0 Meters", 
-      exclude_restricted_elements = "EXCLUDE", 
-      search_query = "NHDFlowline #;HydroNet_ND_Junctions #")
-   printMsg('Completed point loading.')
-   
-   del naPoints
-  
-   # Solve upstream service layer; save out lines and updated layer
-   printMsg('Solving service layer...')
-   arcpy.Solve_na(in_network_analysis_layer = in_upTrace, 
-      ignore_invalids = "SKIP", 
-      terminate_on_solve_error = "TERMINATE", 
-      simplification_tolerance = "")
-   in_Lines = arcpy.mapping.ListLayers(in_upTrace, "Lines")[0]
-   printMsg('Saving out lines...')
-   arcpy.CopyFeatures_management(in_Lines, upLines)
-   arcpy.RepairGeometry_management(upLines, "DELETE_NULL")
-   printMsg('Saving updated %s service layer to %s...' %(in_upTrace, in_lyrUpTrace))
-   arcpy.SaveToLayerFile_management(in_upTrace, in_lyrUpTrace)
-
-   # Add ID field from original points to facilities
-   joinPt = arcpy.CopyFeatures_management(arcpy.mapping.ListLayers(in_upTrace, "Facilities")[0],
-                                          out_Scratch + os.sep + "in_Points")
-   arcpy.AddField_management(joinPt, ptid_join, "LONG")
-   arcpy.CalculateField_management(joinPt, ptid_join, "!Name!", "PYTHON")
-
-   # output lines datasets, with original points ID attached
-   # Note: Facilty ID in Lines == ObjectID in Facilities. The join adds the unique point ID field to Lines.
-   printMsg('Dissolving line networks...')
-   arcpy.JoinField_management(upLines, "FacilityID", joinPt, "ObjectID", ptid_join)
-
-   # first select lines from NHDFlowline to join. This makes the join faster.
-   oids = [str(int(a[0])) for a in arcpy.da.SearchCursor(upLines, "SourceOID")]
-   query = 'OBJECTID IN (' + ','.join(oids) + ')'
-   nhdFlow_lyr = arcpy.MakeFeatureLayer_management(nhdFlow, where_clause=query)
-   arcpy.JoinField_management(upLines, "SourceOID", nhdFlow_lyr, "OBJECTID", "NHDPlusID")
-
-   arcpy.CopyFeatures_management(upLines, out_Lines + '_full')
-   arcpy.Dissolve_management(upLines, out_Lines, dissolve_field=ptid_join)
-
-   # Get catchments, if in_Catchment is given
-   if in_Catchment:
-      out_CatchArea = out_Lines + '_catchArea'
-      out_Cat = GetCatchments_hw(out_Lines + '_full', in_Catchment, out_CatchArea, in_Points, ptid_join)
-
-   # timestamp
-   t1 = datetime.now()
-   ds = GetElapsedTime(t0, t1)
-   printMsg('Completed function. Time elapsed: %s' % ds)
-
-   arcpy.CheckInExtension("Network")
-
-   return out_Lines
-
-
 def GetCatchments_hw(in_Lines, in_Catchment, out_CatchArea, in_Points, ptid_join="OBJECTID_in_Points"):
+   """Internal function to select catchments associated with an upstream network.
 
+   in_Lines = Line networks, output from a network analyst service area analysis
+   in_Catchment = Full NHDPlusHR Catchments feature class
+   out_CatchArea = Output network catchments feature class
+   in_Points = original points
+   ptid_join = Unique integer ID for each network, inherited from original points (in_Points)
+   """
    # Use NHDPlusID to build a query. NHDPlusID is necessary for this.
    oids = set([str(int(a[0])) for a in arcpy.da.SearchCursor(in_Lines, "NHDPlusID")])
    oids = list(oids)
@@ -253,10 +167,11 @@ def GetCatchments_hw(in_Lines, in_Catchment, out_CatchArea, in_Points, ptid_join
    out_subCat = 'hw_Flowline_subCatchArea'
    if not arcpy.Exists(out_subCat):
       # Only needs to run once. Uses a fixed name so it can be reused for other catchments generated in the gdb.
-      GetSubCatchments_hw(in_Lines, out_CatchArea + '_full', out_subCat, ptid_join, 'F:/David/GIS_data/NHDPlus_HR')
+      GetSubCatchments_hw(in_Lines, out_CatchArea + '_full', out_subCat, ptid_join)  # 'F:/David/GIS_data/NHDPlus_HR')
    print("Replacing initial catchment with sub-catchment...")
    catch_full = arcpy.MakeFeatureLayer_management(out_CatchArea + '_full')
-   nid_oid = [[ptid_join + " = " + str(a[0]), "NHDPlusID = " + str(int(a[1]))] for a in arcpy.da.SearchCursor(out_subCat, [ptid_join, "NHDPlusID"])]
+   nid_oid = [[ptid_join + " = " + str(a[0]), "NHDPlusID = " + str(int(a[1]))] for a in
+              arcpy.da.SearchCursor(out_subCat, [ptid_join, "NHDPlusID"])]
    # make query for pairwise selection of catchments
    query = '(' + ') OR ('.join([' AND '.join(b) for b in nid_oid]) + ')'
    arcpy.SelectLayerByAttribute_management(catch_full, "NEW_SELECTION", query)
@@ -295,6 +210,15 @@ def GetCatchments_hw(in_Lines, in_Catchment, out_CatchArea, in_Points, ptid_join
 
 def GetSubCatchments_hw(in_Lines, in_CatchArea, out_subCatch,
                         ptid_join="OBJECTID_in_Points", fdr_src='L:/David/GIS_data/NHDPlus_HR'):
+   """Internal function to generate the initial sub-catchment for each upstream network. Uses Watershed within the
+   initial catchment, and then converts to polygon.
+
+   in_Lines = Line networks, output from a network analyst service area analysis
+   in_CatchArea = Catchments associated with in_Lines
+   out_subCatch = Output sub-catchments
+   ptid_join = Unique integer ID for each network, inherited from original points (in_Points)
+   fdr_src = Source directory for NHDPlusHR rasters (fdr rasters used to calculate Watersheds).
+   """
 
    print("Generating sub-catchment for initial pour points...")
    arcpy.CheckOutExtension("Spatial")
@@ -309,14 +233,16 @@ def GetSubCatchments_hw(in_Lines, in_CatchArea, out_subCatch,
    # unique ID
    uid = ptid_join
 
-   # One Watershed run per HU4
+   # One Watershed run for each HU4 region
    arcpy.SelectLayerByAttribute_management(flow, "NEW_SELECTION", "FromCumul_Length = 0")
    arcpy.Statistics_analysis(flow, temp + os.sep + 'flowdup', [['NHDPlusID', 'Count']], 'NHDPlusID')
    maxnid = max([a[0] for a in arcpy.da.SearchCursor(temp + os.sep + 'flowdup', 'COUNT_NHDPlusID')])
    if maxnid > 1:
       print('Duplication in starting reach/catchments. This method will not work correctly for those catchments.')
-   nid_oid = [[uid + " = " + str(a[0]), "NHDPlusID = " + str(int(a[1]))] for a in arcpy.da.SearchCursor(flow, [uid, "NHDPlusID"])]
-   # NOTE: some OIDs do not get a reach, generally since they are at the 'bottom' of the catchment already and do not need a subcatchment.
+   nid_oid = [[uid + " = " + str(a[0]), "NHDPlusID = " + str(int(a[1]))] for a in
+              arcpy.da.SearchCursor(flow, [uid, "NHDPlusID"])]
+   # NOTE: some OIDs do not get a reach, generally since they are at the 'bottom' of the catchment already, and do not
+   #  need a subcatchment.
    # make query for pairwise selection of catchments
    query = '(' + ') OR ('.join([' AND '.join(b) for b in nid_oid]) + ')'
    arcpy.SelectLayerByAttribute_management(cat, "NEW_SELECTION", query)
@@ -353,8 +279,8 @@ def GetSubCatchments_hw(in_Lines, in_CatchArea, out_subCatch,
       # arcpy.sa.Watershed(fdr, flow, uid).save(catsub)
       arcpy.env.outputCoordinateSystem = in_CatchArea
       arcpy.RasterToPolygon_conversion(catsub, catsub + '_poly0', "NO_SIMPLIFY",
-                                       "Value") #,  "MULTIPLE_OUTER_PART")
-      arcpy.Dissolve_management(catsub + '_poly0', catsub + '_poly0d', 'gridcode')  # Not Necessary in Pro
+                                       "Value")  # ,  "MULTIPLE_OUTER_PART")  # Use this argument in Pro; makes dissolve unnecessary
+      arcpy.Dissolve_management(catsub + '_poly0', catsub + '_poly0d', 'gridcode')
       arcpy.Identity_analysis(catsub + '_poly0d', cat, catsub + '_poly1')
       arcpy.Select_analysis(catsub + '_poly1', catsub + '_final', 'gridcode = ' + uid)
       ls_sub.append(catsub + '_final')
@@ -367,6 +293,132 @@ def GetSubCatchments_hw(in_Lines, in_CatchArea, out_subCatch,
    arcpy.env.snapRaster = None
    arcpy.env.cellSize = None
    arcpy.env.mask = None
+
+
+def GetNetworks_hw(in_Points, in_lyrUpTrace, in_hydroNet, out_Lines, in_Catchment=None,
+                   out_Scratch=arcpy.env.scratchGDB):
+   '''Loads point(s), solves the upstream service layer to get lines, grabs catchments intersecting lines.
+    Outputs are two feature classes (dissolved lines and catchments, one feature per input point).
+   Parameters:
+   - in_Points = Input feature class representing sample point(s) along network
+   - in_lyrUpTrace = Network Analyst service layer set up to run upstream
+   - in_hydroNet = Hydrological network used to build service layer. Must Contain NHDFlowline feature class
+   - out_Lines = Output lines representing upstream flow to a specified distance from point
+   - in_Catchment = Input catchment polygons layer, matching flowlines from in_hydroNet. Optional: if given, the
+      catchments for the network will be output, using the naming scheme `[out_Lines]_catchArea`.
+   - out_Scratch = Geodatabase to contain intermediate outputs
+   '''
+   arcpy.CheckOutExtension("Network")
+   nhdFlow = os.path.dirname(in_hydroNet) + os.sep + 'NHDFlowline'
+   if not arcpy.Exists(nhdFlow):
+      return 'NHDFlowine file does not exist in network dataset `' + in_hydroNet + '`.'
+
+   # get point field info, add new field storing ID
+   ptid = str([f.name for f in arcpy.Describe(in_Points).Fields][0])
+   ptid_join = ptid + '_in_Points'
+   if ptid_join not in [str(f.name) for f in arcpy.Describe(in_Points).Fields]:
+      print('Adding new field `' + ptid_join + '` to points as a unique ID...')
+      arcpy.AddField_management(in_Points, ptid_join, "LONG")
+      arcpy.CalculateField_management(in_Points, ptid_join, '!' + ptid + '!', "PYTHON")
+   else:
+      print('Using existing field `' + ptid_join + '` as a unique point ID...')
+
+   # timestamp
+   t0 = time.time()
+
+   # Set up some variables
+   if out_Scratch == "in_memory":
+      # recast to save to disk, otherwise there is no OBJECTID field for queries as needed
+      out_Scratch = arcpy.env.scratchGDB
+   printMsg('Casting strings to layer objects...')
+   if pyvers < 3:
+      in_upTrace = arcpy.mapping.Layer(in_lyrUpTrace)
+   else:
+      in_lyrUpTrace = in_lyrUpTrace + 'x'
+      in_upTrace = in_lyrUpTrace
+      # in_upTrace = arcpy.mp.LayerFile(in_lyrUpTrace)
+   upLines = out_Scratch + os.sep + 'upLines'
+
+   # Load point(s) as facilities into service layer; search distance 50 meters
+   printMsg('Loading points into service layer...')
+   naPoints = arcpy.AddLocations_na(in_network_analysis_layer=in_upTrace,
+                                    sub_layer="Facilities",
+                                    in_table=in_Points,
+                                    field_mappings="Name " + ptid_join + " #",
+                                    search_tolerance="50 Meters",
+                                    sort_field=ptid_join,
+                                    search_criteria="NHDFlowline SHAPE;HydroNet_ND_Junctions NONE",
+                                    match_type="MATCH_TO_CLOSEST",
+                                    append="CLEAR",
+                                    snap_to_position_along_network="SNAP",
+                                    snap_offset="0 Meters",
+                                    exclude_restricted_elements="EXCLUDE",
+                                    search_query="NHDFlowline #;HydroNet_ND_Junctions #")
+   printMsg('Completed point loading.')
+
+   del naPoints
+
+   # Solve upstream service layer; save out lines and updated layer
+   printMsg('Solving service layer...')
+   arcpy.Solve_na(in_network_analysis_layer=in_upTrace,
+                  ignore_invalids="SKIP",
+                  terminate_on_solve_error="TERMINATE",
+                  simplification_tolerance="")
+   if pyvers < 3:
+      in_Lines = arcpy.mapping.ListLayers(in_upTrace, "Lines")[0]
+      printMsg('Saving updated %s service layer to %s...' % (in_upTrace, in_lyrUpTrace))
+      arcpy.SaveToLayerFile_management(in_upTrace, in_lyrUpTrace)
+   else:
+      in_upTrace = arcpy.mp.LayerFile(in_upTrace)
+      in_Lines = in_upTrace.listLayers("Lines")[0]
+      in_upTrace.save()
+   printMsg('Saving out lines...')
+   arcpy.CopyFeatures_management(in_Lines, upLines)
+   arcpy.RepairGeometry_management(upLines, "DELETE_NULL")
+
+   # Add ID field from original points to facilities
+   if pyvers < 3:
+      fac0 = arcpy.mapping.ListLayers(in_upTrace, "Facilities")[0]
+   else:
+      fac0 = in_upTrace.listLayers("Facilities")[0]
+   joinPt = arcpy.CopyFeatures_management(fac0, out_Scratch + os.sep + "in_Points")
+   arcpy.AddField_management(joinPt, ptid_join, "LONG")
+   arcpy.CalculateField_management(joinPt, ptid_join, "!Name!", "PYTHON")
+
+   # output lines datasets, with original points ID attached
+   # Note: Facility ID in Lines == ObjectID in Facilities. The join adds the unique point ID field to Lines.
+   printMsg('Dissolving line networks...')
+   arcpy.JoinField_management(upLines, "FacilityID", joinPt, "ObjectID", ptid_join)
+
+   # first select lines from NHDFlowline to join. This makes the join faster.
+   oids = [str(int(a[0])) for a in arcpy.da.SearchCursor(upLines, "SourceOID")]
+   query = 'OBJECTID IN (' + ','.join(oids) + ')'
+   nhdFlow_lyr = arcpy.MakeFeatureLayer_management(nhdFlow, where_clause=query)
+   arcpy.JoinField_management(upLines, "SourceOID", nhdFlow_lyr, "OBJECTID", "NHDPlusID")
+
+   arcpy.CopyFeatures_management(upLines, out_Lines + '_full')
+   arcpy.Dissolve_management(upLines, out_Lines, dissolve_field=ptid_join)
+
+   # Get catchments, if in_Catchment is given
+   if in_Catchment:
+      out_CatchArea = out_Lines + '_catchArea'
+      out_Cat = GetCatchments_hw(out_Lines + '_full', in_Catchment, out_CatchArea, in_Points, ptid_join)
+
+   # timestamp
+   t1 = time.time()
+   ds = GetElapsedTime(t0, t1)
+   printMsg('Completed function. Time elapsed: %s' % ds)
+
+   arcpy.CheckInExtension("Network")
+
+   try:
+      sa_data = os.path.dirname(fac0.dataSource)
+      arcpy.Delete_management(in_lyrUpTrace)
+      arcpy.Delete_management(sa_data)
+   except:
+      print('Service area layers/datasets not deleted.')
+
+   return out_Lines
 
 
 def main():
@@ -386,8 +438,8 @@ def main():
    # Other datasets/settings
    # in_hydroNet = r'E:\git\HealthyWaters\inputs\watersheds\VA_HydroNet.gdb\HydroNet\HydroNet_ND'
    # in_Catchment = r'E:\git\HealthyWaters\inputs\watersheds\Proc_NHDPlus_HR.gdb\NHDPlusCatchment_Merge_valam'
-   in_hydroNet = r'F:\David\GIS_data\NHDPlus_HR\VA_HydroNetHR.gdb\HydroNet\HydroNet_ND'
-   in_Catchment = r'F:\David\GIS_data\NHDPlus_HR\VA_HydroNetHR.gdb\NHDPlusCatchment'
+   in_hydroNet = r'E:\projects\nhd_network\network_datasets\VA_HydroNetHR.gdb\HydroNet\HydroNet_ND'
+   in_Catchment = r'E:\projects\nhd_network\network_datasets\VA_HydroNetHR.gdb\NHDPlusCatchment'
    dams = False  # whether to include dams as barriers or not
 
    # distances to loop over, in KM
@@ -399,16 +451,6 @@ def main():
       out_Lines = 'hw_Flowline_' + str(km) + 'km'
       in_lyrUpTrace = MakeServiceLayer_hw(in_hydroNet, up_Dist, dams)
       GetNetworks_hw(in_Points, in_lyrUpTrace, in_hydroNet, out_Lines, in_Catchment)
-
-      # Below is now built-in to GetCatchments_hw (which itself is built-in to GetNetworks_hw)
-      # Run sub-catchments only if they don't exist
-      # out_subCat = 'hw_Flowline_subCatchArea'
-      # if not arcpy.Exists(out_subCat):
-      #    GetSubCatchments_hw(out_Lines + '_full', out_Lines + '_catchArea_full', out_subCat,
-      #                        "OBJECTID_in_Points", fdr_src='F:/David/GIS_data/NHDPlus_HR')
-      # NOTE: Make sure to generate catchments, at least for partial watersheds. Because lines get cut in partial
-      # watersheds, a partial flowline may show up in the output Network lines, but may not be long enough to actually
-      # extend into its own catchment. These catchments will not be in the output catchments (which is good).
 
 
 if __name__ == '__main__':
