@@ -107,114 +107,112 @@ def add_NLCD_LCmetrics(in_Zone, out_Tab, in_LandCover, zone_field='Value', class
 
 def main():
 
-   # Land cover data year
-   year = '2016'
-   # Parameters
-   # in_LandCover = r"E:\git\HealthyWaters\inputs\catchments\TestGDB.gdb\lc2016_pro_resample"
-   # in_canopy = r"E:\git\HealthyWaters\inputs\catchments\TestGDB.gdb\treecan2016_resample"
-   # in_imp = r"E:\git\HealthyWaters\inputs\catchments\TestGDB.gdb\imp2016_resample"
-   # mask = r"E:\git\HealthyWaters\inputs\catchments\TestGDB.gdb\lc2016_nowater"
-   in_LandCover = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\lc_" + year + "_proj"
-   # NOTE: no NLCD canopy data for 2001, 2006
-   in_canopy = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\treecan_" + year + "_proj"
-   in_imp = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\imp_" + year + "_proj"
-   mask = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\lc_" + year + "_nowater"
-   in_Catchments = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\NHDPlusCatchment_metrics"
-   in_subCatchments = r"E:\git\HealthyWaters\inputs\watersheds\hw_watershed_nodams_20200420.gdb\hw_Flowline_subCatchArea"
+   # Land cover data years
+   years = ['2016', '2011', '2006', '2001']
+   for year in years:
+      # Parameters
+      in_LandCover = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\lc_" + year + "_proj"
+      # NOTE: no NLCD canopy data for 2001, 2006
+      in_canopy = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\treecan_" + year + "_proj"
+      in_imp = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\imp_" + year + "_proj"
+      mask = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\lc_" + year + "_nowater"
+      in_Catchments = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\NHDPlusCatchment_metrics"
+      in_subCatchments = r"E:\git\HealthyWaters\inputs\watersheds\hw_watershed_nodams_20200423.gdb\hw_Flowline_subCatchArea"
+      print('Processing metrics for year ' + year + '...')
 
-   # Loop over HU4 folders
-   hr_folder = r'L:\David\GIS_data\NHDPlus_HR\HRNHDPlusRasters'
-   hu4 = list(set([a[0] for a in arcpy.da.SearchCursor(in_Catchments, "VPUID")]))
+      # Loop over HU4 folders
+      hr_folder = r'L:\David\GIS_data\NHDPlus_HR\HRNHDPlusRasters'
+      hu4 = list(set([a[0] for a in arcpy.da.SearchCursor(in_Catchments, "VPUID")]))
 
-   # Create file GDB if it doesn't exist
-   ws = r'E:\git\HealthyWaters\inputs\catchments\catMetrics_' + year + '.gdb'
-   if not os.path.exists(ws):
-      arcpy.CreateFileGDB_management(os.path.dirname(ws), os.path.basename(ws))
-   arcpy.env.overwriteOutput = True
-   arcpy.env.workspace = ws
+      # Create file GDB if it doesn't exist
+      ws = r'E:\git\HealthyWaters\inputs\catchments\catMetrics_' + year + '.gdb'
+      if not os.path.exists(ws):
+         arcpy.CreateFileGDB_management(os.path.dirname(ws), os.path.basename(ws))
+      arcpy.env.overwriteOutput = True
+      arcpy.env.workspace = ws
 
-   # Process land cover metrics
-   arcpy.env.mask = None
-   # SubCatchments
-   add_NLCD_LCmetrics(in_subCatchments, 'lc_table_subCatchments', in_LandCover, zone_field='OBJECTID_in_Points')
-   # Full catchments
-   for vpuid in hu4:
-      in_Zone = hr_folder + vpuid + os.sep + "cat.tif"
-      out_Tab = "lc_table_" + vpuid
-      if not arcpy.Exists(out_Tab):
-         # Specify function(s) to run
-         add_NLCD_LCmetrics(in_Zone, out_Tab, in_LandCover)
-         try:
-            add_KeyID(out_Tab)
-         except:
-            print('failed to add key for ' + vpuid + '.')
 
-   # Process canopy and impervious. These use a mask
-   arcpy.env.mask = mask
-   # Subcatchments
-   if arcpy.Exists(in_canopy):
-      add_zs(in_subCatchments, 'canopy_subCatchments', in_canopy, "MEAN", 'OBJECTID_in_Points')
-   add_zs(in_subCatchments, 'imp_subCatchments', in_imp, "MEAN", 'OBJECTID_in_Points')
-   # Regular catchments
-   for vpuid in hu4:
-      in_Zone = hr_folder + vpuid + os.sep + "cat.tif"
-      # canopy
-      if arcpy.Exists(in_canopy):
-         out_Tab = "canopy_" + vpuid
+      # Process land cover metrics
+      arcpy.env.mask = None
+      # SubCatchments
+      add_NLCD_LCmetrics(in_subCatchments, 'lc_table_subCatchments', in_LandCover, zone_field='OBJECTID_in_Points')
+      # Full catchments
+      for vpuid in hu4:
+         in_Zone = hr_folder + vpuid + os.sep + "cat.tif"
+         out_Tab = "lc_table_" + vpuid
          if not arcpy.Exists(out_Tab):
-            add_zs(in_Zone, out_Tab, in_canopy, "MEAN")
+            # Specify function(s) to run
+            add_NLCD_LCmetrics(in_Zone, out_Tab, in_LandCover)
             try:
                add_KeyID(out_Tab)
             except:
                print('failed to add key for ' + vpuid + '.')
-      # impervious
-      out_Tab = "imp_" + vpuid
-      if not arcpy.Exists(out_Tab):
-         add_zs(in_Zone, out_Tab, in_imp, "MEAN")
-         try:
-            add_KeyID(out_Tab)
-         except:
-            print('failed to add key for ' + vpuid + '.')
 
-   # merge all tables by type
-   arcpy.env.workspace = ws
-   tabs = arcpy.ListTables('lc_table_*')
-   arcpy.Merge_management(tabs, 'lc_table_allCatchments')
-   tabs = arcpy.ListTables('canopy_*')
-   if len(tabs) > 0:
-      arcpy.Merge_management(tabs, 'canopy_allCatchments')
-      arcpy.AlterField_management('canopy_allCatchments', 'MEAN', 'percCAN', clear_field_alias=True)
-   tabs = arcpy.ListTables('imp_*')
-   arcpy.Merge_management(tabs, 'imp_allCatchments')
-   arcpy.AlterField_management('imp_allCatchments', 'MEAN', 'percIMP', clear_field_alias=True)
+      # Process canopy and impervious. These use a mask
+      arcpy.env.mask = mask
+      # Subcatchments
+      if arcpy.Exists(in_canopy):
+         add_zs(in_subCatchments, 'canopy_subCatchments', in_canopy, "MEAN", 'OBJECTID_in_Points')
+      add_zs(in_subCatchments, 'imp_subCatchments', in_imp, "MEAN", 'OBJECTID_in_Points')
+      # Regular catchments
+      for vpuid in hu4:
+         in_Zone = hr_folder + vpuid + os.sep + "cat.tif"
+         # canopy
+         if arcpy.Exists(in_canopy):
+            out_Tab = "canopy_" + vpuid
+            if not arcpy.Exists(out_Tab):
+               add_zs(in_Zone, out_Tab, in_canopy, "MEAN")
+               try:
+                  add_KeyID(out_Tab)
+               except:
+                  print('failed to add key for ' + vpuid + '.')
+         # impervious
+         out_Tab = "imp_" + vpuid
+         if not arcpy.Exists(out_Tab):
+            add_zs(in_Zone, out_Tab, in_imp, "MEAN")
+            try:
+               add_KeyID(out_Tab)
+            except:
+               print('failed to add key for ' + vpuid + '.')
 
-   # Copy master catchment table
-   if 'KeyID' not in [a.name for a in arcpy.ListFields(in_Catchments)]:
-      add_KeyID_Catchment(in_Catchments)
-   new_Catchments = os.path.basename(in_Catchments)
-   arcpy.CopyFeatures_management(in_Catchments, new_Catchments)
+      # merge all tables by type
+      new_Catchments = os.path.basename(in_Catchments)
+      if not arcpy.Exists(new_Catchments):
+         tabs = arcpy.ListTables('lc_table_*')
+         arcpy.Merge_management(tabs, 'lc_table_allCatchments')
+         tabs = arcpy.ListTables('canopy_*')
+         if len(tabs) > 0:
+            arcpy.Merge_management(tabs, 'canopy_allCatchments')
+            arcpy.AlterField_management('canopy_allCatchments', 'MEAN', 'percCAN', clear_field_alias=True)
+         tabs = arcpy.ListTables('imp_*')
+         arcpy.Merge_management(tabs, 'imp_allCatchments')
+         arcpy.AlterField_management('imp_allCatchments', 'MEAN', 'percIMP', clear_field_alias=True)
 
-   # loop over merged metric tables, join fields to new_Catchments
-   in_field = "KeyID"
-   tabs = arcpy.ListTables('*_allCatchments')
-   for t in tabs:
-      print('Joining `' + t + '`...')
-      flds = [a.name for a in arcpy.ListFields(t)]
-      fld = [f for f in flds if f.startswith('VALUE_') or f.startswith('perc') or f.startswith('area')]
-      arcpy.JoinField_management(new_Catchments, in_field, t, in_field, fld)
+         # Copy master catchment table
+         if 'KeyID' not in [a.name for a in arcpy.ListFields(in_Catchments)]:
+            add_KeyID_Catchment(in_Catchments)
+         arcpy.CopyFeatures_management(in_Catchments, new_Catchments)
+         # loop over merged metric tables, join fields to new_Catchments
+         in_field = "KeyID"
+         tabs = arcpy.ListTables('*_allCatchments')
+         for t in tabs:
+            print('Joining `' + t + '`...')
+            flds = [a.name for a in arcpy.ListFields(t)]
+            fld = [f for f in flds if f.startswith('VALUE_') or f.startswith('perc') or f.startswith('area')]
+            arcpy.JoinField_management(new_Catchments, in_field, t, in_field, fld)
 
-   # subCatchments
-   if arcpy.Exists('canopy_subCatchments'):
-      arcpy.AlterField_management('canopy_subCatchments', 'MEAN', 'percCAN', clear_field_alias=True)
-   arcpy.AlterField_management('imp_subCatchments', 'MEAN', 'percIMP', clear_field_alias=True)
-   new_subCatchments = os.path.basename(in_subCatchments)
-   arcpy.CopyFeatures_management(in_subCatchments, new_subCatchments)
-   tabs = arcpy.ListTables('*_subCatchment*')
-   for t in tabs:
-      print('Joining `' + t + '`...')
-      flds = [a.name for a in arcpy.ListFields(t)]
-      fld = [f for f in flds if f.startswith('VALUE_') or f.startswith('perc') or f.startswith('area')]
-      arcpy.JoinField_management(new_subCatchments, 'OBJECTID_in_Points', t, 'OBJECTID_in_Points', fld)
+      # subCatchments
+      if arcpy.Exists('canopy_subCatchments'):
+         arcpy.AlterField_management('canopy_subCatchments', 'MEAN', 'percCAN', clear_field_alias=True)
+      arcpy.AlterField_management('imp_subCatchments', 'MEAN', 'percIMP', clear_field_alias=True)
+      new_subCatchments = os.path.basename(in_subCatchments)
+      arcpy.CopyFeatures_management(in_subCatchments, new_subCatchments)
+      tabs = arcpy.ListTables('*_subCatchment*')
+      for t in tabs:
+         print('Joining `' + t + '`...')
+         flds = [a.name for a in arcpy.ListFields(t)]
+         fld = [f for f in flds if f.startswith('VALUE_') or f.startswith('perc') or f.startswith('area')]
+         arcpy.JoinField_management(new_subCatchments, 'OBJECTID_in_Points', t, 'OBJECTID_in_Points', fld)
 
 
 main()
