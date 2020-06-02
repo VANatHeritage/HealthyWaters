@@ -1,8 +1,8 @@
 # ----------------------------------------------------------------------------------------
 # HealthyWaters.py
-# Version:  ArcGIS 10.3.1 / Python 2.7.8
+# Version:  ArcGIS 10.3.1 / Python 2.7.8 OR ArcPro / Python 3.x
 # Creation Date: 2020-01-06
-# Last Edit: 2020-04-23
+# Last Edit: 2020-06-02
 # Creator(s):  Kirsten R. Hazler/David Bucklin
 
 # Summary:
@@ -37,7 +37,6 @@
 # ----------------------------------------------------------------------------------------
 
 # Import modules
-# import Helper
 from Helper import *
 
 
@@ -233,12 +232,13 @@ def GetSubCatchments_hw(in_Lines, in_CatchArea, out_subCatch,
    # unique ID
    uid = ptid_join
 
-   # One Watershed run for each HU4 region
+   # Select the initial flowline for each network
    arcpy.SelectLayerByAttribute_management(flow, "NEW_SELECTION", "FromCumul_Length = 0")
    arcpy.Statistics_analysis(flow, temp + os.sep + 'flowdup', [['NHDPlusID', 'Count']], 'NHDPlusID')
    maxnid = max([a[0] for a in arcpy.da.SearchCursor(temp + os.sep + 'flowdup', 'COUNT_NHDPlusID')])
    if maxnid > 1:
-      print('Duplication in starting reach/catchments. This method will not work correctly for those catchments.')
+      print('Duplicates found in starting reach/catchment. This method will not work correctly for those points.')
+      # Note: Decided to filter out duplicates (by catchment) prior
    nid_oid = [[uid + " = " + str(a[0]), "NHDPlusID = " + str(int(a[1]))] for a in
               arcpy.da.SearchCursor(flow, [uid, "NHDPlusID"])]
    # NOTE: some OIDs do not get a reach, generally since they are at the 'bottom' of the catchment already, and do not
@@ -274,13 +274,14 @@ def GetSubCatchments_hw(in_Lines, in_CatchArea, out_subCatch,
 
       # Watershed, convert to polygon
       catsub = temp + os.sep + 'catSub_' + str(vpuid)
-      arcpy.PolylineToRaster_conversion(flow, uid, temp + os.sep + 'pp_rast')  # Not Necessary in Pro, which can use lines as Watershed input
+      arcpy.PolylineToRaster_conversion(flow, uid, temp + os.sep + 'pp_rast')
       arcpy.sa.Watershed(fdr, temp + os.sep + 'pp_rast', "Value").save(catsub)
-      # arcpy.sa.Watershed(fdr, flow, uid).save(catsub)
       arcpy.env.outputCoordinateSystem = in_CatchArea
-      arcpy.RasterToPolygon_conversion(catsub, catsub + '_poly0', "NO_SIMPLIFY",
-                                       "Value")  # ,  "MULTIPLE_OUTER_PART")  # Use this argument in Pro; makes dissolve unnecessary
-      arcpy.Dissolve_management(catsub + '_poly0', catsub + '_poly0d', 'gridcode')
+      if pyvers < 3:
+         arcpy.RasterToPolygon_conversion(catsub, catsub + '_poly0', "NO_SIMPLIFY", "Value")
+         arcpy.Dissolve_management(catsub + '_poly0', catsub + '_poly0d', 'gridcode')  # Not Necessary in Pro.
+      else:
+         arcpy.RasterToPolygon_conversion(catsub, catsub + '_poly0d', "NO_SIMPLIFY", "Value", "MULTIPLE_OUTER_PART")
       arcpy.Identity_analysis(catsub + '_poly0d', cat, catsub + '_poly1')
       arcpy.Select_analysis(catsub + '_poly1', catsub + '_final', 'gridcode = ' + uid)
       ls_sub.append(catsub + '_final')
@@ -422,17 +423,17 @@ def GetNetworks_hw(in_Points, in_lyrUpTrace, in_hydroNet, out_Lines, in_Catchmen
 
 
 def main():
+
    # Set up variables
    gdb = 'E:/git/HealthyWaters/inputs/watersheds/hw_watershed_nodams_' + DateStamp() + '.gdb'
-   # gdb = 'C:/David/scratch/HW_watersheds/hw_watershed_nodams_' + DateStamp() + '.gdb'
    arcpy.CreateFileGDB_management(os.path.dirname(gdb), os.path.basename(gdb))
    arcpy.env.workspace = gdb
 
    # Use original points, copy to geodatabase
-   # NOTE: process points as necessary in ArcGIS, then query (lyr) the ones that should get watersheds (e.g. use_HW = 1)
-   in_Points0 = r'E:\git\HealthyWaters\HW_Reaches.gdb\Instar_Reaches_vertend'
+   # NOTE: process points as necessary in ArcGIS, then use query on 'lyr' for ones that should get watersheds
+   in_Points0 = r'E:\git\HealthyWaters\HW_Reaches.gdb\Instar_Reaches_vertend2'
    in_Points = os.path.basename(in_Points0).replace('.shp', '')
-   lyr = arcpy.MakeFeatureLayer_management(in_Points0, where_clause="use_HW = 1 AND DATE_LOC_C IS NOT NULL")
+   lyr = arcpy.MakeFeatureLayer_management(in_Points0, where_clause="use_HW = 1")  # AND DATE_LOC_C IS NOT NULL")
    arcpy.CopyFeatures_management(lyr, in_Points)
 
    # Other datasets/settings

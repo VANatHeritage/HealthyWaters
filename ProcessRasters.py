@@ -1,11 +1,10 @@
 #----------------------------------------------------
 # Purpose: Process Rasters for use in catchments summaries.
-#  This script standardizes rasters to the NHDPlusHR projection, snap/cell size. It will also
-#  mask and crop the rasters to the extent, defined by a 1-km buffer around project catchments (which
-#  is generated if it doesn't exist).
+#  This script standardizes rasters to the NHDPlusHR raster projection, snap, and cell size. It will also
+#  mask and crop the rasters to the extent, defined by a 1-km buffer around project catchments.
 # Version: ArcPro / Python 3+
 # Date Created: 3-12-20
-# Last Edited: 5-20-20
+# Last Edited: 6-2-20
 # Authors: Hannah Huggins/David Bucklin
 #----------------------------------------------------
 
@@ -44,7 +43,10 @@ def process_rasters(in_raster, template_raster, output, setNoData=None):
 def main():
    arcpy.env.overwriteOutput = True
    # template for snap, cell size, projection of outputs
-   template_raster = r'E:\git\HealthyWaters\inputs\snap_raster\HW_templateRaster.tif'
+   template_raster = r'L:\David\GIS_data\NHDPlus_HR\NHDPlus_HR_FlowLength.gdb\flowlengover_VA'
+   arcpy.env.snapRaster = template_raster
+   arcpy.env.cellSize = template_raster
+
    # original NHDPlusHR catchments
    cat_orig = r'L:\David\GIS_data\NHDPlus_HR\NHDPlus_HR_Virginia.gdb\NHDPlusCatchment'
    gdb = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb"
@@ -52,29 +54,39 @@ def main():
       arcpy.CreateFileGDB_management(os.path.dirname(gdb), os.path.basename(gdb))
    arcpy.env.workspace = gdb
 
-   # process catchments (matching raster coordinate system)
+   # Create catchment master file (both feature and raster), and feature and raster templates (1-km buffer)
    # NOTE: originally was using a VALAM-projected catchment feature class, but noticed some striping in conversion to
-   #  raster. Set projection to match the NHDPlusHR Raster projection for the catchments (which is different than the
-   #  NHDPlusHR features). Seems to have resolved the striping. Also did some manual editing to the catchments
-   #  (exploded several catchments with Null NHDPlusIDs, deleted one falling far outside the processing area). After
-   #  this, the catchments should be buffered (by 1km) to create a processing mask/extent. Below are the steps to
-   #  re-generate this feature class.
+   #  raster. Projection now set to match the NHDPlusHR Raster projection for the catchments (which is different than
+   #  the NHDPlusHR features). Seems to have resolved the striping.
+   # NOTE: Also did some manual editing to the catchments (exploded several catchments with Null NHDPlusIDs, then
+   # deleted one catchment falling far outside the processing area).
    if not arcpy.Exists('NHDPlusCatchment_metrics'):
       print('Copying original catchments...')
       arcpy.env.outputCoordinateSystem = template_raster
       arcpy.FeatureClassToFeatureClass_conversion(cat_orig, gdb, 'NHDPlusCatchment_metrics')
-      # TODO: manually edit this feature class now, prior to continuing
-      arcpy.Buffer_analysis('NHDPlusCatchment_metrics', 'NHDPlusCatchment_metrics_1kmBuff', "1000 Meters", dissolve_option="ALL")
+      # TODO: manually edit this feature class now, prior to continuing. See notes above.
+      arcpy.PairwiseBuffer_analysis('NHDPlusCatchment_metrics', 'NHDPlusCatchment_metrics_1kmBuff', "1000 Meters", dissolve_option="ALL")
+      arcpy.AddField_management('NHDPlusCatchment_metrics_1kmBuff', 'val', 'SHORT')
+      arcpy.CalculateField_management('NHDPlusCatchment_metrics_1kmBuff', 'val', '1')
+      arcpy.PolygonToRaster_conversion('NHDPlusCatchment_metrics_1kmBuff', 'val', 'HW_templateRaster')
+      arcpy.BuildPyramids_management('HW_templateRaster')
       # Generate new unique ID for each catchment; will rasterize this value. For use only in this script
       arcpy.AddField_management('NHDPlusCatchment_metrics', 'catID', 'LONG')
       arcpy.CalculateField_management('NHDPlusCatchment_metrics', 'catID', '!OBJECTID!')
       print('Creating catchment raster...')
       arcpy.PolygonToRaster_conversion('NHDPlusCatchment_metrics', 'catID', 'NHDPlusCatchment_metrics_raster')
       arcpy.BuildPyramids_management('NHDPlusCatchment_metrics_raster')
-      arcpy.env.outputCoordinateSystem = None
+
+   # Re-set template raster to the one just created
+   template_raster = 'HW_templateRaster'
+   arcpy.env.snapRaster = template_raster
+   arcpy.env.cellSize = template_raster
+
 
    # Use the catchment buffer for processing mask
-   # cat = "NHDPlusCatchment_metrics_1kmBuff"
+   # Note: Coordinate system is set in the function; otherwise, want the default (same as input)
+   arcpy.env.outputCoordinateSystem = None
+   # Raster environment settings
    arcpy.env.extent = template_raster
    arcpy.env.mask = template_raster
 
@@ -144,16 +156,12 @@ def main():
       arcpy.MultipartToSinglepart_management('rdcrs0', 'rdcrs')
 
       # Rasterizing will count each cell (10-m) with a crossing counts as one
-      arcpy.env.snapRaster = template_raster
-      arcpy.env.cellSize = template_raster
       arcpy.env.outputCoordinateSystem = template_raster
       # roadcross can be used in zonal SUM, then divide by (areaLand*1000000; sq km) from NLCD
       arcpy.PointToRaster_conversion('rdcrs', 'rastval', out, cellsize=template_raster)
       # convert to binary crossing/not crossing. This could be used with zonal MEAN to get crossings/area.
       # arcpy.sa.Con(arcpy.sa.IsNull('roadcross'), 0, 1).save('roadstrcross')
       # arcpy.PolylineToRaster_conversion('rcl',)  # not sure this is necessary
-      arcpy.env.snapRaster = None
-      arcpy.env.cellSize = None
       arcpy.env.outputCoordinateSystem = None
 
 
