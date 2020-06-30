@@ -2,7 +2,7 @@
 # procSSURGO.py
 # Version: ArcPro / Python 3+
 # Creation Date: 2020-05-19
-# Last Edit: 2020-06-26
+# Last Edit: 2020-06-30
 # Creator: Kirsten R. Hazler
 #
 # Summary: Functions for processing SSURGO data and producing rasters representing soil conditions, as well as functions inspired by OpenNSPECT software to produce rasters representing interactions between soils, topography, and land cover.
@@ -19,6 +19,7 @@ import arcpy
 import sys, os
 from arcpy.sa import *
 arcpy.CheckOutExtension("Spatial")
+from datetime import datetime as datetime 
 
 ### Helper functions (should be moved over to Helper.py later)
 def createFGDB(FGDB):
@@ -125,21 +126,15 @@ def ProjectToMatch_ras(in_Data, in_Template, out_Data, resampleType = "NEAREST",
       arcpy.ProjectRaster_management (in_Data, out_Data, sr_Out, resampleType, cellSize, geoTrans)
       return out_Data
  
-     
-# Main functions      
-def Downscale_ras(in_Raster, in_GridPts, valFld, in_clpShp, in_Snap, out_Raster, resType = "BILINEAR", numPts = 9, maxDist = ""):
-   '''Converts a lower resolution raster to one of higher resolution to match the cell size and alignment of the specified snap raster. A gridded point feature class may be used instead of raster input. 
+def Downscale_ras(in_Raster, in_Snap, out_Raster, resType = "BILINEAR", in_clpShp = "NONE"):
+   '''Converts a lower resolution raster to one of higher resolution to match the cell size and alignment of the specified snap raster.
    
    Parameters:
    - in_Raster: input raster to be resampled. Enter NONE if using input points instead.
-   - in_GridPts: input points in grid formation, representing input raster to be resampled. Enter NONE if using the input raster directly.
-   - valFld: the field in the input points used to determine output raster values. Ignored if raster input.
-   - in_clpShp: input feature class used to clip the input raster or input points. Enter NONE if no clipping is needed.
    - in_Snap: snap raster used to set output cell size and alignment; also acts as mask
    - out_Raster: output resampled raster
-   - resType: raster resampling type (NEAREST, BILINEAR, CUBIC, or MAJORITY). Ignored if point input
-   - numPts: number of points used for interpolation, if input is a point feature class. Ignored if raster input
-   - maxDist: maximum search radius for interpolation, if input is a point feature class. Ignored if raster input
+   - resType: raster resampling type (NEAREST, BILINEAR, CUBIC, or MAJORITY)
+   - in_clpShp: input feature class used to clip the input raster. Enter NONE if no clipping is needed.
    '''
    
    # Set environment variables        
@@ -150,7 +145,10 @@ def Downscale_ras(in_Raster, in_GridPts, valFld, in_clpShp, in_Snap, out_Raster,
    cellSize = arcpy.GetRasterProperties_management(in_Snap, "CELLSIZEX").getOutput(0)
    scratchGDB = arcpy.env.scratchGDB
    
-   if in_clpShp != "NONE":
+   if in_clpShp == "NONE":
+      clpRast = in_Raster
+   else:
+      clpRast = scratchGDB + os.sep + "clpRast"
       print("Getting extents of clip shape...")
       desc = arcpy.Describe(in_clpShp)
       xmin = desc.extent.XMin
@@ -158,75 +156,61 @@ def Downscale_ras(in_Raster, in_GridPts, valFld, in_clpShp, in_Snap, out_Raster,
       ymin = desc.extent.YMin
       ymax = desc.extent.YMax
       rect = "%s %s %s %s" %(xmin, ymin, xmax, ymax)
+      print("Clipping raster...")
+      arcpy.management.Clip(in_Raster, rect, clpRast, in_clpShp, "", "ClippingGeometry", "NO_MAINTAIN_EXTENT")
    
-   if in_GridPts != "NONE":
-      ### Process if input point feature class is used
-      if in_clpShp == "NONE":  
-         clpPts = in_GridPts
-      else:
-         clpPts = scratchGDB + os.sep + "clpPts"
-         print("Clipping feature class...")
-         arcpy.Clip_analysis(in_GridPts, in_clpShp, clpPts)
-      
-      prjPts = scratchGDB + os.sep + "prjPts"
-      tmpPts = ProjectToMatch_vec(clpPts, in_Snap, prjPts, copy = 1)
-      
-      print("Interpolating points...")
-      radius = RadiusVariable(numPts, maxDist)
-      finRast = Idw(tmpPts, valFld, cellSize, 2, radius)
-      
-      print("Finalizing output and saving...")
-      finRast.save(out_Raster)
+   resRast = scratchGDB + os.sep + "resRast"
+   tmpRast = ProjectToMatch_ras(clpRast, in_Snap, resRast, resType, cellSize)
    
+   if tmpRast == clpRast:
+      # If no re-projection occurred...
+      print("Resampling...")
+      arcpy.management.Resample(clpRast, resRast, cellSize, resType)
    else:
-      ### Process if input raster is used
-      if in_clpShp == "NONE":
-         clpRast = in_Raster
-      else:
-         clpRast = scratchGDB + os.sep + "clpRast"
-         print("Clipping raster...")
-         arcpy.management.Clip(in_Raster, rect, clpRast, in_clpShp, "", "ClippingGeometry", "NO_MAINTAIN_EXTENT")
-      
-      resRast = scratchGDB + os.sep + "resRast"
-      tmpRast = ProjectToMatch_ras(clpRast, in_Snap, resRast, resType, cellSize)
-      
-      if tmpRast == clpRast:
-         # If no re-projection occurred...
-         print("Resampling...")
-         arcpy.management.Resample(clpRast, resRast, cellSizeOut, resType)
-      else:
-         pass
-   
-      print("Finalizing output and saving...")
-      finRast = Con(in_Snap, resRast)
-      finRast.save(out_Raster)
+      pass
+
+   print("Finalizing output and saving...")
+   finRast = Con(in_Snap, resRast)
+   finRast.save(out_Raster)
 
    print("Mission complete.")
 
-def Downscale_ras(in_Raster, in_GridPts, valFld, in_clpShp, in_Snap, out_Raster, resType = "BILINEAR", numPts = 9, maxDist = ""):
-   '''Converts a lower resolution raster to one of higher resolution to match the cell size and alignment of the specified snap raster. A gridded point feature class may be used instead of raster input. 
+def interpPoints(in_Points, valFld, in_Snap, out_Raster, in_clpShp = "NONE", interpType = "IDW", numPts = 9, maxDist = "", cellSize = ""):
+   '''Converts a point dataset to a raster via specified interpolation method
+   
+   NOTES/LESSONS LEARNED: 
+   - I tried multiple methods on the PMP point data. In the end I settled on the topographic method.
+   - The topographic method is memory-intensive. It failed (memory allocation error) when I tried to interpolate the PMP data to 10-m. Instead, I ended up doing the topographic interpolation to a 250-m cell size, then resampling that output to get a 10-m resolution raster. 
    
    Parameters:
-   - in_Raster: input raster to be resampled. Enter NONE if using input points instead.
-   - in_GridPts: input points in grid formation, representing input raster to be resampled. Enter NONE if using the input raster directly.
-   - valFld: the field in the input points used to determine output raster values. Ignored if raster input.
-   - in_clpShp: input feature class used to clip the input raster or input points. Enter NONE if no clipping is needed.
+   - in_Points: input points with values to be interpolated
+   - valFld: the field in the input points used to determine output raster values. 
    - in_Snap: snap raster used to set output cell size and alignment; also acts as mask
    - out_Raster: output resampled raster
-   - resType: raster resampling type (NEAREST, BILINEAR, CUBIC, or MAJORITY). Ignored if point input
-   - numPts: number of points used for interpolation, if input is a point feature class. Ignored if raster input
-   - maxDist: maximum search radius for interpolation, if input is a point feature class. Ignored if raster input
+   - in_clpShp: input feature class used to clip the input raster or input points. Enter NONE if no clipping is needed.
+   - interpType: interpolation type (SPLINE, TREND2, TREND3, TOPO, or IDW). 
+   - numPts: number of points used for interpolation. Ignored if TREND2 interpolation.
+   - maxDist: maximum search radius for interpolation. Ignored if SPLINE or TREND2 interpolation.
+   - cellSize: cell size of the output raster. If not specified, same as in_Snap raster.
    '''
+   
+   # timestamp
+   t0 = datetime.now()
    
    # Set environment variables        
    arcpy.env.overwriteOutput = True
    arcpy.env.snapRaster = in_Snap
    arcpy.env.extent = in_Snap
    arcpy.env.mask = in_Snap
-   cellSize = arcpy.GetRasterProperties_management(in_Snap, "CELLSIZEX").getOutput(0)
    scratchGDB = arcpy.env.scratchGDB
    
-   if in_clpShp != "NONE":
+   if cellSize == "":
+      cellSize = arcpy.GetRasterProperties_management(in_Snap, "CELLSIZEX").getOutput(0)
+   
+   if in_clpShp == "NONE":  
+      clpPts = in_Points
+   else:
+      clpPts = scratchGDB + os.sep + "clpPts"
       print("Getting extents of clip shape...")
       desc = arcpy.Describe(in_clpShp)
       xmin = desc.extent.XMin
@@ -234,51 +218,43 @@ def Downscale_ras(in_Raster, in_GridPts, valFld, in_clpShp, in_Snap, out_Raster,
       ymin = desc.extent.YMin
       ymax = desc.extent.YMax
       rect = "%s %s %s %s" %(xmin, ymin, xmax, ymax)
+      print("Clipping feature class...")
+      arcpy.Clip_analysis(in_Points, in_clpShp, clpPts)
    
-   if in_GridPts != "NONE":
-      ### Process if input point feature class is used
-      if in_clpShp == "NONE":  
-         clpPts = in_GridPts
-      else:
-         clpPts = scratchGDB + os.sep + "clpPts"
-         print("Clipping feature class...")
-         arcpy.Clip_analysis(in_GridPts, in_clpShp, clpPts)
-      
-      prjPts = scratchGDB + os.sep + "prjPts"
-      tmpPts = ProjectToMatch_vec(clpPts, in_Snap, prjPts, copy = 1)
-      
-      print("Interpolating points...")
+   prjPts = scratchGDB + os.sep + "prjPts"
+   tmpPts = ProjectToMatch_vec(clpPts, in_Snap, prjPts, copy = 1)
+   
+   if interpType == "IDW":
+      # This is not as smooth as I'd like, but output makes more sense than spline for PMP points
+      print("Interpolating points using inverse weighted squared distance...")
       radius = RadiusVariable(numPts, maxDist)
       finRast = Idw(tmpPts, valFld, cellSize, 2, radius)
-      
-      print("Finalizing output and saving...")
-      finRast.save(out_Raster)
-   
+   elif interpType == "SPLINE":
+      # This did NOT work well with PMP data points - values WAY out of range on the periphery
+      print("Interpolating points using spline...")
+      finRast = Spline(tmpPts, valFld, cellSize, "REGULARIZED", "", numPts)
+   elif interpType == "TREND2":
+      print("Interpolating points using 2nd-order polynomial trend...")
+      finRast = Trend(tmpPts, valFld, cellSize, 2, "LINEAR")
+   elif interpType == "TREND3":
+      print("Interpolating points using 3nd-order polynomial trend...")
+      finRast = Trend(tmpPts, valFld, cellSize, 3, "LINEAR")
+   elif interpType == "TOPO":
+      print("Interpolating points using topographic algorithm...")
+      ptFeats = TopoPointElevation([[tmpPts, valFld]])
+      in_topo_features = [ptFeats]
+      finRast = TopoToRaster(in_topo_features, cellSize, rect, "", "", "", "NO_ENFORCE", "SPOT")
    else:
-      ### Process if input raster is used
-      if in_clpShp == "NONE":
-         clpRast = in_Raster
-      else:
-         clpRast = scratchGDB + os.sep + "clpRast"
-         print("Clipping raster...")
-         arcpy.management.Clip(in_Raster, rect, clpRast, in_clpShp, "", "ClippingGeometry", "NO_MAINTAIN_EXTENT")
+      print("Interpolation type specification is invalid. Aborting.")
+      sys.exit()
       
-      resRast = scratchGDB + os.sep + "resRast"
-      tmpRast = ProjectToMatch_ras(clpRast, in_Snap, resRast, resType, cellSize)
-      
-      if tmpRast == clpRast:
-         # If no re-projection occurred...
-         print("Resampling...")
-         arcpy.management.Resample(clpRast, resRast, cellSizeOut, resType)
-      else:
-         pass
+   print("Finalizing output and saving...")
+   finRast.save(out_Raster)
    
-      print("Finalizing output and saving...")
-      finRast = Con(in_Snap, resRast)
-      finRast.save(out_Raster)
-
-   print("Mission complete.")
-
+   # timestamp
+   t1 = datetime.now()
+   ds = GetElapsedTime (t0, t1)
+   print("Completed interpolation function. Time elapsed: %s" % ds)
 
 def PolyToRaster(in_Poly, in_Fld, in_Snap, out_Rast):
    '''Converts polygons to raster based on specified field.
@@ -324,7 +300,18 @@ def PolyToRaster(in_Poly, in_Fld, in_Snap, out_Rast):
    print("Rasterization complete.")
    return
 
-def GDBtoRaster(in_gdbList, in_Fld, in_Snap, out_Raster):
+def GetElapsedTime (t0, t1):
+   """Gets the time elapsed between the start time (t0) and the finish time (t1).
+   NOTE: This had to be modified from the function originally written for Python 2.x"""
+   delta = t1 - t0
+   (d, m, s) = (delta.days, int(delta.seconds/60), delta.seconds%60)
+   h = int(m/60)
+   deltaString = '%s days, %s hours, %s minutes, %s seconds' % (str(d), str(h), str(m), str(s))
+   return deltaString
+   
+# Main functions      
+
+def SSURGOtoRaster(in_gdbList, in_Fld, in_Snap, out_Raster):
    '''From one or more gSSURGO geodatabases, creates a raster representing values from a specified field in the MUPOLYGON feature class. 
    
    Parameters:
@@ -736,10 +723,13 @@ def rusleRKS(in_Rfactor, in_Kfactor, in_Sfactor, out_RKS):
    
    # Calculate propensity for soil loss by multiplying the factors
    print("Calculating propensity for soil loss...")
-   RKS = in_Rfactor*in_Kfactor*in_Sfactor
+   R = Raster(in_Rfactor)
+   K = Raster(in_Kfactor)
+   S = Raster(in_Sfactor)
+   RKS = R*K*S
    
    print("Saving output...")
-   sens.save(out_RKS)
+   RKS.save(out_RKS)
    
    print("Mission complete.")
 
@@ -1012,16 +1002,16 @@ def curvNum(in_LC, in_HydroGrp, out_CN):
    
    print("Mission complete.")
 
-def eventRunoff(in_Curve, in_Rain, out_GDB, yearTag, cellArea, curveType = "CN", convFact = 1):
+def eventRunoff(in_Raster, in_Rain, out_GDB, yearTag, cellArea, inputType = "CN", convFact = 1):
    '''Produces an output raster representing event-based runoff volume in Liters
    
    Parameters:
-   - in_Curve: input raster representing curve numbers OR maximum retention
+   - in_Raster: input raster representing curve numbers OR maximum retention
    - in_Rain: input constant or raster representing rainfall
    - out_GDB: geodatabase for storing outputs
    - yearTag: tag to add to basenames to indicate land cover year determining curve numbers 
    - cellArea: area of cells in Curve Number raster, in square centimeters
-   - curveType: indicates whether in_Curve is curve numbers (CN) or retention (RET)
+   - inputType: indicates whether in_Raster is curve numbers (CN) or retention (RET)
    - convFact: conversion factor to convert input rainfall depth units to inches
    '''
    # Set overwrite to be true         
@@ -1031,35 +1021,55 @@ def eventRunoff(in_Curve, in_Rain, out_GDB, yearTag, cellArea, curveType = "CN",
    scratchGDB = arcpy.env.scratchGDB
    
    # Set up some variables
-   in_CN = Raster(in_CN)
+   in_Raster = Raster(in_Raster)
    try:
       in_Rain = Raster(in_Rain)
    except:
       pass
    out_Retention = out_GDB + os.sep + "Retention_%s" %yearTag
-   out_locRunoff = out_GDB + os.sep + "locRunoff_%s" %yearTag
+   out_runoffDepth = out_GDB + os.sep + "runoffDepth_%s" %yearTag
+   out_runoffVolume = out_GDB + os.sep + "runoffVol_%s" %yearTag
    out_accumRunoff = out_GDB + os.sep + "accRunoff_%s" %yearTag
 
    # Perform calculations
+   # Result could be raster or a constant depending on input
    if convFact != 1:
-      rain = convFact*in_Rain
+      rain = convFact*in_Rain 
    else:
       rain = in_Rain
    
-   if curvType == "CN":
+   if inputType == "CN":
       print("Calculating maximum retention...")
-      retention = (float(1000)/in_CN) - 10
+      # Have to deal with division by zero here.
+      retention = Con(in_Raster == 0, 1000, ((float(1000)/in_Raster) - 10))
+      print("Saving...")
       retention.save(out_Retention)
    else:
-      retention = Raster(in_Curve)
+      retention = in_Raster
    
-   print("Calculating runoff volume...")
+   print("Calculating runoff depth (inches)...")
+   # Set runoff depth to zero if rainfall is less than initial abstraction
+   runoffDepth = Con((rain - 0.2*retention) > 0,(rain - 0.2*retention)**2/(rain + 0.8*retention),0)
+   print("Saving...")
+   runoffDepth.save(out_runoffDepth)
+   
+   print("Calculating runoff volume (liters)...")
    # 2.54 converts inches to cm
    # 0.001 converts cubic cm to liters
-   runoff = 0.00254*cellArea*(rain - 0.2*retention)**2/(rain + 0.8*retention)
+   volumeConversion = 0.00254*cellArea
+   runoffVolume = volumeConversion*runoffDepth
+   print("Saving...")
+   runoffVolume.save(out_runoffVolume)
    
-   print("Saving local runoff raster...")
-   runoff.save(out_locRunoff)
+   # if in_FlowDir != "NONE":
+      # print("Calculating runoff accumulation...")
+      # accumRunoff = FlowAccumulation(in_FlowDir, runoff, "FLOAT", "D8") + runoff
+      # print("Saving...")
+      # accumRunoff.save(out_accumRunoff)
+   # else:
+      # print("No flow direction raster provided; runoff not accumulated.")
+   
+   print("Mission accomplished.")
  
 def main():
    # Inputs - Soils
@@ -1082,18 +1092,47 @@ def main():
    pmpFld = "PMP_24"
    
    # Outputs
-   outGDB = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200626.gdb" # I change this frequently   
+   outGDB = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200629.gdb" # I change this frequently   
    out_Runoff = outGDB + os.sep + "runoffScore"
    out_Erosion = outGDB + os.sep + "erosionScore"
    out_SoilSens = outGDB + os.sep + "soilSens" 
    out_hydroGrp = outGDB + os.sep + "hydroGroup"
    out_Slope = outGDB + os.sep + "slope_perc"
-   out_Kfactor = outGDB + os.sep + "rusleK"
-   out_Sfactor = outGDB + os.sep + "rusleS"
-   out_Rfactor = outGDB + os.sep + "rusleR"
+   out_Kfactor = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\rusleK"
+   out_Sfactor = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200626.gdb\rusleS"
+   out_Rfactor = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200601.gdb\rusleR"
    out_RKS = outGDB + os.sep + "rusleRKS"
-   #out_maxPrecip = outGDB + os.sep + "maxPrecip_gen24" # Don't use this output
-   out_maxPrecip25 = outGDB + os.sep + "maxPrecip_gen24_25pt"
+   out_maxPrecip_topo250 = outGDB + os.sep + "maxPrecip_gen24_topo250"
+   out_maxPrecip_topo10 = outGDB + os.sep + "maxPrecip_gen24_topo10"
+   in_Rain = out_maxPrecip_topo10
+   
+   # Year-specific Outputs/Inputs
+   # RUSLE C-Factor
+   rusleC_2016 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\rusleC_2016"
+   rusleC_2011 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\rusleC_2011"
+   rusleC_2006 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\rusleC_2006"
+   rusleC_2001 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\rusleC_2001"   
+   
+   # Curve Numbers
+   curvNum_2016 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\curvNum_2016"
+   curvNum_2011 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\curvNum_2011"
+   curvNum_2006 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\curvNum_2006"
+   curvNum_2001 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\curvNum_2001"
+   
+   # Pollutant Coefficients
+   Nitrogen_2016 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\Nitrogen_2016"
+   Nitrogen_2011 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\Nitrogen_2011"
+   Nitrogen_2006 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\Nitrogen_2006"
+   Nitrogen_2001 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\Nitrogen_2001"
+   Phosphorus_2016 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\Phosphorus_2016"
+   Phosphorus_2011 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\Phosphorus_2011"
+   Phosphorus_2006 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\Phosphorus_2006"
+   Phosphorus_2001 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\Phosphorus_2001"
+   SuspSolids_2016 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\SuspSolids_2016"
+   SuspSolids_2011 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\SuspSolids_2011"
+   SuspSolids_2006 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\SuspSolids_2006"
+   SuspSolids_2001 = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200527.gdb\SuspSolids_2001"
+   
    
    # Processing Lists/Dictionaries
    gdbList = [dc_gdb, de_gdb, ky_gdb, md_gdb, nc_gdb, pa_gdb, tn_gdb, va_gdb, wv_gdb]
@@ -1105,18 +1144,20 @@ def main():
    nlcdDict[2006] = r"E:\SpatialData\NLCD_landCover.gdb\lc_2006_proj"
    nlcdDict[2001] = r"E:\SpatialData\NLCD_landCover.gdb\lc_2001_proj"
    
-   # Specify function(s) to run
+   
+   ### Specify function(s) to run
    createFGDB(outGDB) # Create the specified outGDB if it doesn't already exist
+   
+   ### Create scores for Watershed Model
    # for gdb in gdbList:
       # RunoffScore_vec(gdb)
       # ErosionScore_vec(gdb)
-      # HydroGrp_vec(gdb)
-      
-   # GDBtoRaster(gdbList, "runoffScore", in_Snap, out_Runoff)
-   # GDBtoRaster(gdbList, "erosionScore", in_Snap, out_Erosion)
+      # HydroGrp_vec(gdb) 
+   # SSURGOtoRaster(gdbList, "runoffScore", in_Snap, out_Runoff)
+   # SSURGOtoRaster(gdbList, "erosionScore", in_Snap, out_Erosion)
    # SoilSensitivity(out_Runoff, out_Erosion, out_Slope, out_SoilSens)
 
-   # Create NSPECT pollution coefficient rasters
+   ### Create NSPECT pollution coefficient rasters
    # for year in nlcdDict.keys():
       # print("Working on %s data..." %year)
       # cList = [["Nitrogen", "NPOLL"], 
@@ -1128,28 +1169,30 @@ def main():
          # out_Coeff = outGDB + os.sep + "%s_%s" %(rName, year)
          # coeffNSPECT(nlcdDict[year], coeffType, out_Coeff)
    
-   # Create Curve Number rasters
-   # GDBtoRaster(gdbList, "HydroGrpNum", in_Snap, out_hydroGrp)
+   ### Create Curve Number rasters
+   # SSURGOtoRaster(gdbList, "HydroGrpNum", in_Snap, out_hydroGrp)
    # for year in nlcdDict.keys():
       # print("Working on %s data..." %year)
       # in_LC = nlcdDict[year]
       # out_CN = outGDB + os.sep + "curvNum_%s" %year
       # curvNum(in_LC, out_hydroGrp, out_CN)
       
-   # Create RUSLE factors
-   # GDBtoRaster(gdbList, "kFactor", in_Snap, out_Kfactor)
+   ### Create RUSLE factors
+   # SSURGOtoRaster(gdbList, "kFactor", in_Snap, out_Kfactor)
    # for year in nlcdDict.keys():
       # print("Working on %s data..." %year)
       # rName = "rusleC"
       # out_Cfactor = outGDB + os.sep + "%s_%s" %(rName, year)
       # coeffNSPECT(nlcdDict[year], "CFACT", out_Cfactor)
-   # Downscale_ras(in_Rfactor, "NONE", "NONE", in_clpShp, in_Snap, out_Rfactor, resType = "BILINEAR")
+   # Downscale_ras(in_Rfactor, in_Snap, out_Rfactor, "BILINEAR", in_clpShp)
    # SlopeTrans(in_Elev, "ELEV", "RUSLE", out_Sfactor, out_Slope, zfactor = 0.01)
-   rusleRKS(in_Rfactor, in_Kfactor, in_Sfactor, out_RKS)
+   # rusleRKS(out_Rfactor, out_Kfactor, out_Sfactor, out_RKS)
    
-   # Downscale_ras("NONE", in_pmpPts, pmpFld, in_clpShp, in_Snap, out_maxPrecip, resType = "BILINEAR", numPts = 4, maxDist = "") # Don't use this output
-   Downscale_ras("NONE", in_pmpPts, pmpFld, in_clpShp, in_Snap, out_maxPrecip25, resType = "BILINEAR", numPts = 25, maxDist = "")
-   
+   ### Get Probable Maximum Precipitation and Runoff
+   # For now just do 2016; later add other years
+   # interpPoints(in_pmpPts, pmpFld, in_Snap, out_maxPrecip_topo250, in_clpShp, "TOPO", "", "", 250)
+   # Downscale_ras(out_maxPrecip_topo, in_Snap, out_maxPrecip_topo10, "BILINEAR", in_clpShp)
+   # eventRunoff(curvNum_2016, in_Rain, outGDB, "2016", 1000000, "CN")
 
    
 if __name__ == '__main__':
