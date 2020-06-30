@@ -4,9 +4,11 @@
 *.idea
 *__pycache__
 *.ini
+*.zip
 
 # Python
 *.pyc
+.pyHistory
 
 # R files
 # History files
@@ -23,3 +25,7 @@
 
 # ArcGIS
 *.mxd
+*.aprx
+
+# subfolders
+*/*

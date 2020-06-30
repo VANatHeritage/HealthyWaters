@@ -1,10 +1,9 @@
 #----------------------------------------------------
-# Name: Land Cover Metrics Assigner
+# Name: Catchment Zonal summaries
+#  This script summarizes metrics (land cover, crops, road crossings, etc.) within catchments.
 # Version: ArcPro / Python 3+
 # Date Created: 3-5-20
-# Last Edited: 4-23-20
 # Authors: Hannah Huggins / David Bucklin
-# Summary: Adds desired metrics to a summary table for a zone raster.
 #----------------------------------------------------
 
 import arcpy
@@ -13,70 +12,68 @@ import os
 arcpy.CheckOutExtension("Spatial")
 
 
-# From KeyID_code_fixed.py
-def add_KeyID(out_table):
-   """This function creates a KeyID field based on the raster_num and the Str_VALUE, which is created in the function.
-   Parameter:
-   out_tables = This is the pathname to and name of the output tables"""
-   bid = out_table[-4:]
-   # make the value field string
-   # new_value = arcpy.AddField_management(out_table, "Str_VALUE", "TEXT")
-   # arcpy.CalculateField_management(out_table, "Str_VALUE", "!VALUE!", "PYTHON")
-   # Make a KeyID by combining the raster_num and Str_VALUE fields
-   arcpy.AddField_management(out_table, "KeyID", "TEXT")
-   expression = "'" + str(bid) + "' + str(int(!VALUE!))"
-   arcpy.CalculateField_management(out_table, "KeyID", expression, "PYTHON")
-   # Statement on location in the loop
-   print("{} KeyID created".format(bid))
+def add_zs(in_Zone, zone_field, in_raster, out_Tab, stat="MEAN", fld_name=None, mask=None):
+   """This function is a wrapper around ZonalStatisticsAsTable, allowing to set a mask just for the summary,
+   and change the name of the summary field."""
 
-
-# From KeyID_code_fixed.py
-def add_KeyID_Catchment(catchment_table):
-   """This function creates a KeyID field based on the GridCode and the VPUID fields
-   Parameter:
-   catchment_table = This is the pathname to and name of the catchment table"""
-   arcpy.AddField_management(catchment_table, "KeyID", "TEXT")
-   expression = "str(!VPUID!) + str(!GridCode!)"
-   arcpy.CalculateField_management(catchment_table, "KeyID", expression, "PYTHON")
-   # Statement on location in the loop
-   print("KeyID Created")
-
-
-def add_zs(in_Zone, out_Tab, in_raster, stat, zone_field='Value'):
-   """This function uses the Zonal Statistics as Table Tool to create an output table about canopies.
-   Parameters:
-   in_Zone = The input raster that defines the zones where the Zonal Statistics function.
-   out_Tab = This is the pathname to and name of the output table
-   in_raster = The input dataset that the statistics are based on.
-   stat = what statistic type will be calculated"""
-   # Specify fields for rasters
-   print(in_Zone)
-   print(out_Tab)
+   print('Zonal summarizing ' + stat + ' of raster `' + in_raster + '`...')
+   if mask:
+      envmask = arcpy.env.mask
+      arcpy.env.mask = mask
    arcpy.sa.ZonalStatisticsAsTable(in_Zone, zone_field, in_raster, out_Tab, "DATA", stat)
-   print("Zonal statistics for `" + in_raster + "` calculated.")
+   if fld_name:
+      arcpy.AlterField_management(out_Tab, stat, fld_name, clear_field_alias=True)
+   if mask:
+      arcpy.env.mask = envmask
+   return out_Tab
+
+
+def cat_join(cat_tab, cat_id, join_tab, join_id, fld_suffix=""):
+   """Joins summarized table to master catchment feature class, by selecting fields to
+   join (based on the field prefix), optionally adding a suffix to field names (i.e. buffer size), and
+   deleting join_tab following the join."""
+
+   flds = [a.name for a in arcpy.ListFields(join_tab)]
+   # TODO: update prefixes as needed
+   fld = [f for f in flds if f.startswith(('perc', 'area', 'dens', 'leng', 'num', 'freq'))]
+   if fld_suffix != "":
+      for f in fld:
+         arcpy.AlterField_management(join_tab, f, f + fld_suffix, clear_field_alias=True)
+      fld = [f + fld_suffix for f in fld]
+   print('Joining fields : [' + ', '.join(fld) + ']')
+   fld_exist = [f.name for f in arcpy.ListFields(cat_tab) if f.name in fld]
+   if len(fld_exist) > 0:
+      print("Removing existing fields...")
+      for f in fld_exist:
+         arcpy.DeleteField_management(cat_tab, f)
+   arcpy.JoinField_management(cat_tab, cat_id, join_tab, join_id, fld)
+   arcpy.Delete_management(join_tab)
+   return cat_tab
 
 
 def add_NLCD_LCmetrics(in_Zone, out_Tab, in_LandCover, zone_field='Value', class_field='Value'):
    """This function creates a table based on the Tabulate Area tool and adds landcover metrics.
    Parameter:
-   # in_outs = [in_Zones, out_Tab]
-   in_Zone = The input raster that defines the zones where the tabulate area functions.
-   out_Tab = This is the pathname to and name of the output table
-   in_LandCover = The input dataset that defines the classes that have their areas summarized in the zones."""
+   in_Zone = The input raster/features that defines the zones where the tabulate area functions.
+   out_Tab = output table
+   in_LandCover = The input dataset that defines the classes that have their areas summarized in the zones.
+   zone_field = Field in in_Zone that defines the unique zones.
+   class_field = Field in in_Landcover with class values."""
+
    # Specify fields for rasters
-   print(in_Zone)
-   print(out_Tab)
+   print('Tabulating values in field `' + class_field + '` for raster `' + in_LandCover + '`...')
    # Tabulate area
    arcpy.sa.TabulateArea(in_Zone, zone_field, in_LandCover, class_field, out_Tab)
-   # add missing fields (can happen for less common land covers in small watersheds)
    nlcd_val = ['11', '21', '22', '23', '24', '31', '41', '42', '43', '52', '71', '81', '82', '90', '95']
    all_nm = ['VALUE_' + a for a in nlcd_val]
    tab_nm = [a.name for a in arcpy.ListFields(out_Tab)]
+   # add missing fields (can happen for less common land covers in small watersheds)
    miss = [a for a in all_nm if a not in tab_nm]
    for m in miss:
       print('Adding missing field `' + m + '`.')
       arcpy.AddField_management(out_Tab, m, 'LONG')
       arcpy.CalculateField_management(out_Tab, m, '0')
+   arcpy.AlterField_management(out_Tab, 'VALUE_11', 'areaWater', clear_field_alias=True)
    # Add and calculate areaLand field
    arcpy.AddField_management(out_Tab, "areaLand", "DOUBLE")
    arcpy.CalculateField_management(out_Tab, "areaLand", "!VALUE_21! + !VALUE_22! + !VALUE_23! + !VALUE_24! + !VALUE_31! + !VALUE_41! + !VALUE_42! + !VALUE_43! + !VALUE_52! + !VALUE_71! + !VALUE_81! + !VALUE_82! + !VALUE_90! + !VALUE_95!")
@@ -102,117 +99,232 @@ def add_NLCD_LCmetrics(in_Zone, out_Tab, in_LandCover, zone_field='Value', class
    # Add and calculate percBARE field
    arcpy.AddField_management(out_Tab, "percBARE", "DOUBLE")
    arcpy.CalculateField_management(out_Tab, "percBARE", "((!VALUE_31!) / !areaLand!) * 100")
-   print("The output table `" + out_Tab + "` has been created.")
+   # Add and calculate percDEV field
+   arcpy.AddField_management(out_Tab, "percDEV", "DOUBLE")
+   arcpy.CalculateField_management(out_Tab, "percDEV", "((!VALUE_21! + !VALUE_22! + !VALUE_23! + !VALUE_24!) / !areaLand!) * 100")
+   return out_Tab
 
 
-def main():
+# HEADER FOR ALL PROCESSES
 
-   # Land cover data years
-   years = ['2016', '2011', '2006', '2001']
+# Source geodatabase for input rasters
+src_gdb = r'E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb'
+
+# Template raster. Note that mask and extent should NOT be set. Masking is handled by-variable
+template_raster = r'E:\git\HealthyWaters\inputs\snap_raster\HW_templateRaster.tif'
+arcpy.env.overwriteOutput = True
+arcpy.env.cellSize = template_raster
+arcpy.env.snapRaster = template_raster
+arcpy.env.outputCoordinateSystem = template_raster
+arcpy.env.parallelProcessingFactor = "75%"
+# Workspaces are created and set throughout the workflow. Do not set here.
+
+# Stream buffer zones
+# 'Buffer' (flow distance) raster prefix. See StreamBufferZones.py
+fdbuff = 'L:/David/GIS_data/NHDPlus_HR/NHDPlus_HR_FlowLength.gdb/flowDistance'
+# List of stream buffer sizes. The empty string value `''` generates metrics for full catchments
+buffs = ['', '_100m', '_250m', '_500m']
+
+# NLCD years, for multi-temporal variables
+years = ['2001', '2006', '2011', '2016']
+
+# Catchment feature class
+in_Catchments0 = src_gdb + os.sep + 'NHDPlusCatchment_metrics'
+# unique ID for catchments
+catID = 'catID'
+# Rasterized version of catchemnts. This is in ProcessRasters.py, with some manual editing involved; see notes there.
+in_Catchments = src_gdb + os.sep + 'NHDPlusCatchment_raster'
+if catID not in [a.name for a in arcpy.ListFields(in_Catchments0)]:
+   print('Missing catID field...')
+if not arcpy.Exists(in_Catchments):
+   print('Missing catchment raster...')
+
+# SubCatchment feature class. Will be converted to raster
+in_subCatchments0 = r"E:\git\HealthyWaters\inputs\watersheds\hw_watershed_nodams_20200528.gdb\hw_Flowline_subCatchArea"
+# unique ID for sub-Catchments = same as unique INSTAR ID.
+subcatID = 'OBJECTID_in_Points'
+
+# make subCatchment zone rasters/features (re-run if subCatchments are updated)
+in_subCatchments = src_gdb + os.sep + 'subCat_rast'
+if not arcpy.Exists(in_subCatchments):
+   arcpy.PolygonToRaster_conversion(in_subCatchments0, subcatID, in_subCatchments)
+   for b in buffs[1:4]:
+      print(b)
+      out = fdbuff + b + '_subCatRast'
+      arcpy.sa.ExtractByMask(in_subCatchments, fdbuff + b + '_catRast').save(out)
+      out = fdbuff + b + '_subCatFeat'
+      arcpy.Clip_analysis(in_subCatchments0, fdbuff + b + '_catFeat', out)
+
+# List of catchment/subCatchment properties:
+#  [zones data, unique ID field, name for outputs, zone ID field, name of join dataset]
+# Processing is the same for both datasets, so setting up this list allows to loop over the two datasets.
+cattype = [[in_subCatchments, subcatID, 'subCatchments', 'Value', os.path.basename(in_subCatchments0)],
+           [in_Catchments, catID, 'Catchments', 'Value', os.path.basename(in_Catchments0)]]
+
+# END HEADER
+
+
+# NLCD (land cover, impervious, canopy)
+for t in cattype:
+   c = t[0]
+   cid = t[1]
+   cnm = t[2]
+   czn = t[3]
+   cjn = t[4]
+   print('Working on ' + cnm + '...')
+
+   ### NLCD Variables: loop over years
    for year in years:
-      # Parameters
-      in_LandCover = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\lc_" + year + "_proj"
-      # NOTE: no NLCD canopy data for 2001, 2006
-      in_canopy = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\treecan_" + year + "_proj"
-      in_imp = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\imp_" + year + "_proj"
-      mask = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\lc_" + year + "_nowater"
-      in_Catchments = r"E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\NHDPlusCatchment_metrics"
-      in_subCatchments = r"E:\git\HealthyWaters\inputs\watersheds\hw_watershed_nodams_20200423.gdb\hw_Flowline_subCatchArea"
-      print('Processing metrics for year ' + year + '...')
 
-      # Loop over HU4 folders
-      hr_folder = r'L:\David\GIS_data\NHDPlus_HR\HRNHDPlusRasters'
-      hu4 = list(set([a[0] for a in arcpy.da.SearchCursor(in_Catchments, "VPUID")]))
-
-      # Create file GDB if it doesn't exist
-      ws = r'E:\git\HealthyWaters\inputs\catchments\catMetrics_' + year + '.gdb'
+      # Create file GDB (one for each year), catchment copies
+      ws = r'E:\git\HealthyWaters\inputs\catchments\Test_catMetrics_' + year + '.gdb'
       if not os.path.exists(ws):
+         print('Making new geodatabase `' + ws + '`...')
          arcpy.CreateFileGDB_management(os.path.dirname(ws), os.path.basename(ws))
-      arcpy.env.overwriteOutput = True
+         arcpy.CopyFeatures_management(in_Catchments0, ws + os.sep + os.path.basename(in_Catchments0))
+         arcpy.CopyFeatures_management(in_subCatchments0, ws + os.sep + os.path.basename(in_subCatchments0))
       arcpy.env.workspace = ws
 
+      # Land cover datasets
+      in_LandCover = src_gdb + os.sep + "lc_" + year + "_proj"
+      in_canopy = src_gdb + os.sep + "treecan_" + year + "_proj"
+      in_imp = src_gdb + os.sep + "imp_" + year + "_proj"
+      mask = src_gdb + os.sep + "lc_" + year + "_nowater"
 
-      # Process land cover metrics
-      arcpy.env.mask = None
-      # SubCatchments
-      add_NLCD_LCmetrics(in_subCatchments, 'lc_table_subCatchments', in_LandCover, zone_field='OBJECTID_in_Points')
-      # Full catchments
-      for vpuid in hu4:
-         in_Zone = hr_folder + vpuid + os.sep + "cat.tif"
-         out_Tab = "lc_table_" + vpuid
-         if not arcpy.Exists(out_Tab):
-            # Specify function(s) to run
-            add_NLCD_LCmetrics(in_Zone, out_Tab, in_LandCover)
-            try:
-               add_KeyID(out_Tab)
-            except:
-               print('failed to add key for ' + vpuid + '.')
+      # Loop over buffers
+      for buff in buffs:
+         print('Working on year ' + year + ' for buffer size: ' + buff)
+         if buff != "":
+            # change zone raster to the buffer-only versions
+            if cnm == 'subCatchments':
+               c1 = fdbuff + buff + '_subCatRast'
+            else:
+               c1 = fdbuff + buff + '_catRast'
+         else:
+            c1 = c
 
-      # Process canopy and impervious. These use a mask
-      arcpy.env.mask = mask
-      # Subcatchments
-      if arcpy.Exists(in_canopy):
-         add_zs(in_subCatchments, 'canopy_subCatchments', in_canopy, "MEAN", 'OBJECTID_in_Points')
-      add_zs(in_subCatchments, 'imp_subCatchments', in_imp, "MEAN", 'OBJECTID_in_Points')
-      # Regular catchments
-      for vpuid in hu4:
-         in_Zone = hr_folder + vpuid + os.sep + "cat.tif"
-         # canopy
+         # Calculate and join metrics
+         add_NLCD_LCmetrics(c1, 'lc_table_' + cnm + buff, in_LandCover, zone_field=czn)
+         cat_join(cjn, cid, 'lc_table_' + cnm + buff, czn, buff)
+         # NOTE: no NLCD canopy data for 2001, 2006
          if arcpy.Exists(in_canopy):
-            out_Tab = "canopy_" + vpuid
-            if not arcpy.Exists(out_Tab):
-               add_zs(in_Zone, out_Tab, in_canopy, "MEAN")
-               try:
-                  add_KeyID(out_Tab)
-               except:
-                  print('failed to add key for ' + vpuid + '.')
-         # impervious
-         out_Tab = "imp_" + vpuid
-         if not arcpy.Exists(out_Tab):
-            add_zs(in_Zone, out_Tab, in_imp, "MEAN")
-            try:
-               add_KeyID(out_Tab)
-            except:
-               print('failed to add key for ' + vpuid + '.')
-
-      # merge all tables by type
-      new_Catchments = os.path.basename(in_Catchments)
-      if not arcpy.Exists(new_Catchments):
-         tabs = arcpy.ListTables('lc_table_*')
-         arcpy.Merge_management(tabs, 'lc_table_allCatchments')
-         tabs = arcpy.ListTables('canopy_*')
-         if len(tabs) > 0:
-            arcpy.Merge_management(tabs, 'canopy_allCatchments')
-            arcpy.AlterField_management('canopy_allCatchments', 'MEAN', 'percCAN', clear_field_alias=True)
-         tabs = arcpy.ListTables('imp_*')
-         arcpy.Merge_management(tabs, 'imp_allCatchments')
-         arcpy.AlterField_management('imp_allCatchments', 'MEAN', 'percIMP', clear_field_alias=True)
-
-         # Copy master catchment table
-         if 'KeyID' not in [a.name for a in arcpy.ListFields(in_Catchments)]:
-            add_KeyID_Catchment(in_Catchments)
-         arcpy.CopyFeatures_management(in_Catchments, new_Catchments)
-         # loop over merged metric tables, join fields to new_Catchments
-         in_field = "KeyID"
-         tabs = arcpy.ListTables('*_allCatchments')
-         for t in tabs:
-            print('Joining `' + t + '`...')
-            flds = [a.name for a in arcpy.ListFields(t)]
-            fld = [f for f in flds if f.startswith('VALUE_') or f.startswith('perc') or f.startswith('area')]
-            arcpy.JoinField_management(new_Catchments, in_field, t, in_field, fld)
-
-      # subCatchments
-      if arcpy.Exists('canopy_subCatchments'):
-         arcpy.AlterField_management('canopy_subCatchments', 'MEAN', 'percCAN', clear_field_alias=True)
-      arcpy.AlterField_management('imp_subCatchments', 'MEAN', 'percIMP', clear_field_alias=True)
-      new_subCatchments = os.path.basename(in_subCatchments)
-      arcpy.CopyFeatures_management(in_subCatchments, new_subCatchments)
-      tabs = arcpy.ListTables('*_subCatchment*')
-      for t in tabs:
-         print('Joining `' + t + '`...')
-         flds = [a.name for a in arcpy.ListFields(t)]
-         fld = [f for f in flds if f.startswith('VALUE_') or f.startswith('perc') or f.startswith('area')]
-         arcpy.JoinField_management(new_subCatchments, 'OBJECTID_in_Points', t, 'OBJECTID_in_Points', fld)
+            add_zs(c1, czn, in_canopy, 'canopy_' + cnm + buff, "MEAN", 'percCAN', mask)
+            cat_join(cjn, cid, 'canopy_' + cnm + buff, czn, buff)
+         add_zs(c1, czn, in_imp, 'imp_' + cnm + buff, "MEAN", 'percIMP', mask)
+         cat_join(cjn, cid, 'imp_' + cnm + buff, czn, buff)
+# end NLCD
 
 
-main()
+### Non year-specific variables
+
+# Set up geodatabase
+ws = r'E:\git\HealthyWaters\inputs\catchments\TEST_catMetrics_noYear.gdb'
+if not os.path.exists(ws):
+   arcpy.CreateFileGDB_management(os.path.dirname(ws), os.path.basename(ws))
+   arcpy.CopyFeatures_management(in_Catchments0, ws + os.sep + os.path.basename(in_Catchments0))
+   arcpy.CopyFeatures_management(in_subCatchments0, ws + os.sep + os.path.basename(in_subCatchments0))
+arcpy.env.workspace = ws
+
+
+### Crop frequencies
+# These use the open water mask; use the NLCD 2016 version
+mask = src_gdb + os.sep + "lc_2016_nowater"
+for t in cattype:
+   c = t[0]
+   cid = t[1]
+   cnm = t[2]
+   czn = t[3]
+   cjn = t[4]
+   print('Working on ' + cnm + '...')
+
+   # Loop over crop frequency rasters
+   ls = ['pasturefreq', 'cornfreq', 'cottonfreq', 'soyfreq', 'wheatfreq']
+   for i in ls:
+      crop = src_gdb + os.sep + i + '_proj'
+      for buff in buffs:
+         print('Working on `' + i + '` for buffer size: ' + buff)
+         if buff != "":
+            # change zone raster to the buffer-only versions
+            if cnm == 'subCatchments':
+               c1 = fdbuff + buff + '_subCatRast'
+            else:
+               c1 = fdbuff + buff + '_catRast'
+         else:
+            c1 = c
+
+         varname = 'freq' + i.replace('freq', '').upper()
+         # Get zonal statistics
+         add_zs(c1, czn, crop, i, "MEAN", varname, mask)
+         cat_join(cjn, cid, i, czn, buff)
+
+
+### Roads
+# NOTE: These are all-vector analyses. Don't use the rasterized catchments
+# Set up geodatabase
+ws = r'E:\git\HealthyWaters\inputs\catchments\TEST_catMetrics_noYear.gdb'
+arcpy.env.workspace = ws
+
+# Roads feature class
+rcl = src_gdb + os.sep + 'rcl'
+# Road crossings (point) feature class
+rdcrs = src_gdb + os.sep + 'rdcrs1'
+stream = r'L:\David\GIS_data\NHDPlus_HR\NHDPlus_HR_Virginia.gdb\NHDFlowline'
+
+# Loop over catchments
+for t in cattype:
+   # These are vector analyses, so change the zones to the original features instead of rasters
+   if t[2] == 'Catchments':
+      c = in_Catchments0
+   else:
+      c = in_subCatchments0
+   cid = t[1]
+   cnm = t[2]
+   czn = t[3]
+   cjn = t[4]
+   print('Working on ' + cnm + '...')
+
+   # Roads: length (km) and density (km per square km)
+   out = 'road_length'
+   for buff in buffs:
+      # These use the feature buffers. NOTE: Stream-area is included in the buffer (unlike rasters analyses)
+      print('Working on road length/density for buffer size: ' + buff)
+      if buff != "":
+         if cnm == 'subCatchments':
+            c1 = fdbuff + buff + '_subCatFeat'
+         else:
+            c1 = fdbuff + buff + '_catFeat'
+      else:
+         c1 = c
+
+      if 'area_sqm' not in [a.name for a in arcpy.ListFields(c1)]:
+         arcpy.AddField_management(c1, 'area_sqm', 'DOUBLE')
+         arcpy.CalculateGeometryAttributes_management(c1, [['area_sqm', 'AREA']], area_unit='SQUARE_METERS')
+
+      # Intersect and dissolve by catchment
+      arcpy.PairwiseIntersect_analysis([c1, rcl], 'cat_rcl', 'NO_FID', output_type='LINE')
+      # Dissolve is needed to remove overlapping roads
+      arcpy.PairwiseDissolve_analysis('cat_rcl', 'cat_rcl_diss0', [cid, 'area_sqm'])
+      # summarize road length and area
+      arcpy.Statistics_analysis('cat_rcl_diss0', out, [['Shape_Length', 'SUM'], ['area_sqm', 'MAX']], cid)
+      arcpy.AddField_management(out, 'lengRD', 'DOUBLE')
+      arcpy.CalculateField_management(out, 'lengRD', '!SUM_Shape_Length! / 1000')
+      arcpy.AddField_management(out, 'densRD', 'DOUBLE')
+      arcpy.CalculateField_management(out, 'densRD', '!lengRD! / (!MAX_area_sqm! / 1000000)')
+      cat_join(cjn, cid, out, cid, buff)
+
+   # Road crossings: number and density (number per sq km)
+   out = 'roadcross_count'
+   print('Calculating road crossing density for ' + cjn + '...')
+   arcpy.SpatialJoin_analysis(rdcrs, c1, 'rdcrs_cat', "JOIN_ONE_TO_ONE", "KEEP_COMMON", match_option="INTERSECT")
+   arcpy.Statistics_analysis('rdcrs_cat', out, [[cid, 'COUNT'], ['area_sqm', 'MAX']], cid)
+   arcpy.AlterField_management(out, 'COUNT_' + cid, 'numRDCRS', clear_field_alias=True)
+   arcpy.AddField_management(out, 'densRDCRS', 'DOUBLE')
+   arcpy.CalculateField_management(out, 'densRDCRS', '!numRDCRS! / (!MAX_area_sqm! / 1000000)', "PYTHON3")
+   cat_join(cjn, cid, out, cid)
+
+del_ls = ['cat_rcl', 'cat_rcl_diss0', 'rdcrs_cat']
+for d in del_ls:
+   arcpy.Delete_management(d)
+
+
+### Add new variables here
