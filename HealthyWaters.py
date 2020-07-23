@@ -407,7 +407,7 @@ def GetNetworks_hw(in_Points, in_lyrUpTrace, in_hydroNet, out_Lines, in_Catchmen
 
    # timestamp
    t1 = time.time()
-   ds = GetElapsedTime(t0, t1)
+   ds = GetElapsedHours(t0, t1)
    printMsg('Completed function. Time elapsed: %s' % ds)
 
    arcpy.CheckInExtension("Network")
