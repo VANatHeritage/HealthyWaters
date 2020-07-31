@@ -2,10 +2,10 @@
 # prioritizeHW.py
 # Version: ArcPro / Python 3+
 # Creation Date: 2020-07-06
-# Last Edit: 2020-07-22
+# Last Edit: 2020-07-29
 # Creator: Kirsten R. Hazler
 #
-# Summary: Functions for a watershed approach to prioritizing lands for conservation or restoration, with the purpose maintaining documented "Healthy Waters".
+# Summary: Functions for a watershed approach to prioritizing lands for conservation or restoration, with the purpose of maintaining documented "Healthy Waters", as well as for the ConservationVision Watershed Model.
 #
 # Adapted from the 2017 edition of the ConservationVision Watershed Model, and from information about the OpenNSPECT tool.
 # For background references and formulas, see: 
@@ -19,6 +19,10 @@
 # Import modules
 import HelperPro
 from HelperPro import *
+
+def calcDW_PopServed():
+   '''Calculates an estimate of the population served 
+   '''
 
 def makeLandcoverMasks(in_LC, out_GDB):
    '''From input land NLCD landcover, creates three processing masks: one for conservation, one for restoration, and one for stormwater management.
@@ -284,13 +288,15 @@ def calcLandscapeScore(in_FlowScore, in_KarstScore, out_LandscapeScore):
    print("Mission accomplished.")
    return score
    
-def calcResourceScore(in_raList, in_Snap, out_ResourceScore):
-   '''Based on polygon features identifying areas impacting resources of interest (e.g., catchments for Healthy Waters sites or drinking water intakes), calculates the weighted number of resources potentially impacted by each cell.
+def calcImportanceScore(in_raList, in_Snap, out_Raster):
+   '''Calculates an Importance Score, based on polygon features identifying areas impacting resources of interest (e.g., catchments for Healthy Waters sites, assessment zones for drinking water intakes, or a Stream Conservation Site delineation).
+   
+   TO DO (?): Add a weighting field for individual features (e.g., count of EOs in SCS, number served by drinking water sources.) Will then also need to rescale each input, or else require rescale prior to input.
    
    Parameters:
    - in_raList: Input list of tuples. Each tuple consists of a polygon feature class representing the impact areas (which may overlap) and the weight assigned to those features.
    - in_Snap: An input raster used to set output cell size and alignment
-   - out_ResourceScore: Output raster representing a Resource Score
+   - out_Raster: Output raster representing the importance for protection/restoration
    
    NOTE: Areas of the output raster not covered by any polygon will be null. This could be appropriate if you are ONLY interested in the drainage areas of specific resources (e.g., for Healthy Waters prioritization). If you want a non-null, non-zero value throughout the "background" cells of the study area (e.g., for a seamless statewide Watershed Model), you can add a bounding polygon to cover the entire area; typically it would make sense to give a weight of 1 to this layer.
    '''
@@ -340,35 +346,38 @@ def calcResourceScore(in_raList, in_Snap, out_ResourceScore):
    score = 100.0*wtSum/rMax
    
    print("Saving...")
-   score.save(out_ResourceScore)
+   score.save(out_Raster)
    
    print("Mission complete.")
-   return out_ResourceScore
+   return out_Raster
 
-def calcImpactScore(in_LandscapeScore, in_SoilSensScore, out_ImpactScore, in_ResourceScore = "NONE"):
-   '''Creates a raster representing Impact Importance Score, based on landscape position and soil sensitivity, and optionally weighted by the number of downstream monitored resources potentially impacted.
+def calcImpactScore(in_LandscapeScore, in_SoilSensScore, out_Raster, in_ImportanceScore = "NONE"):
+   '''Creates a raster representing Impact Importance Score, based on landscape position and soil sensitivity, and optionally weighted by a score based on downstream resources of interest that would potentially be impacted. 
    
    Parameters:
    - in_LandscapeScore: Input raster representing relative importance based on landscape position
    - in_SoilSensScore: Input raster representing relative importance based on soil sensitivity
-   - out_ImpactScore: Output raster representing the relative impact changes to the land at each location will have on aquatic resources downstream.
-   - in_ResourceScore: Input raster representing relative importance based on the number of resources of interest that could be impacted by changes at each location
+   - out_Raster: The output raster representing either the Impact Score (if there is no input Importance Score) or the General Priority Score (if there is an input Importance Score used to adjust the Impact Score).
+   - in_ImportanceScore: Input raster representing relative importance based on the number of resources of interest that could be impacted by changes at each location
    '''
    
-   print("Calculating Impact Importance Score...")
-   if in_ResourceScore != "NONE":
-      score = Raster(in_ResourceScore)/100.0 * (CellStatistics([in_LandscapeScore, in_SoilSensScore], "MEAN", "DATA"))
+   if in_ImportanceScore != "NONE":
+      print("Calculating General Priority Score...")
+      score = Raster(in_ImportanceScore)/100.0 * (CellStatistics([in_LandscapeScore, in_SoilSensScore], "MEAN", "DATA"))
    else:
+      print("Calculating Impact Score"...")
       score = CellStatistics([in_LandscapeScore, in_SoilSensScore], "MEAN", "DATA")
       
    print("Saving...")
-   score.save(out_ImpactScore)
+   score.save(out_Raster)
    
    print("Mission accomplished.")
-   return out_ImpactScore
+   return out_Raster
 
 def ScenarioScore(in_Case, in_WorstCase, in_BestCase, priorType, out_Score, in_Mask = "NONE"):
-   '''Creates a raster representing a "Scenario Score", depending on how the values in the input raster compare to best- and worst-case scenarios for the same variable. Not sure I will ever use this function.
+   '''Creates a raster representing a "Scenario Score", depending on how the values in the input raster compare to best- and worst-case scenarios for the same variable. 
+   
+   *** Not sure I will ever use this function.
    
    Parameters:
    - in_Case: Input raster representing the values of a particular variable of interest
@@ -506,13 +515,6 @@ def main():
    ImpactScore_hwCombo = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\ImpactScore_hwCombo"
    ImpactScore_hw10kCombo = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200721.gdb\ImpactScore_hw10kCombo"
    
-   # consScoreRunoff = outGDB + os.sep + "consScoreRunoff"
-   # consScoreSoilLoss = outGDB + os.sep + "consScoreSoilLoss"
-   # restScoreRunoff = outGDB + os.sep + "restScoreRunoff"
-   # restScoreSoilLoss = outGDB + os.sep + "restScoreSoilLoss"
-   # mgmtScoreRunoff = outGDB + os.sep + "mgmtScoreRunoff"
-   # mgmtScoreSoilLoss = outGDB + os.sep + "mgmtScoreSoilLoss"
-   
    ### Specify function(s) to run
    # Create the specified outGDB if it doesn't already exist
    createFGDB(outGDB) 
@@ -529,30 +531,30 @@ def main():
    # calcKarstScore(KarstPolys, MaskNoWater, KarstScore, KarstPoints, karstGDB)
    # calcLandscapeScore(FlowScore, KarstScore, LandscapeScore)
    
-   # Get Impact Scores
+   # Get Impact, Importance, and Priority Scores
    # in_raList = [(hwResourceAreas,1)]
-   # calcResourceScore(in_raList, MaskNoWater, hwResourceScore)
+   # calcImportanceScore(in_raList, MaskNoWater, hwResourceScore)
    # calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_base, "NONE")
    # calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hw, hwResourceScore)
    
    # list2k = [(hwRA2k,1)]
-   # calcResourceScore(list2k, MaskNoWater, hwResourceScore2k)
+   # calcImportanceScore(list2k, MaskNoWater, hwResourceScore2k)
    # calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hw2k, hwResourceScore2k)
    
    # list10k = [(hwRA10k,1)]
-   # calcResourceScore(list10k, MaskNoWater, hwResourceScore10k)
+   # calcImportanceScore(list10k, MaskNoWater, hwResourceScore10k)
    # calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hw10k, hwResourceScore10k)
    
    # listCombo = [(hwRA2k,1),(hwRA3k,1),(hwRA5k,1),(hwRA10k,1),(hwResourceAreas,1)]
-   # calcResourceScore(listCombo, MaskNoWater, hwResourceScoreCombo)
+   # calcImportanceScore(listCombo, MaskNoWater, hwResourceScoreCombo)
    # calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hwCombo, hwResourceScoreCombo)
    
    # list10kCombo = [(hwRA2k,1),(hwRA3k,1),(hwRA5k,1),(hwRA10k,1)]
-   # calcResourceScore(list10kCombo, MaskNoWater, hwResourceScore10kCombo)
+   # calcImportanceScore(list10kCombo, MaskNoWater, hwResourceScore10kCombo)
    # calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hw10kCombo, hwResourceScore10kCombo)
    
-   calcPriorityScores(ImpactScore_hwCombo, consMask, restMask, mgmtMask, outGDB, "SLICE", 10, "hwCombo")
-   calcPriorityScores(ImpactScore_hw10kCombo, consMask, restMask, mgmtMask, outGDB, "SLICE", 10, "hw10kCombo")
+   # calcPriorityScores(ImpactScore_hwCombo, consMask, restMask, mgmtMask, outGDB, "SLICE", 10, "hwCombo")
+   # calcPriorityScores(ImpactScore_hw10kCombo, consMask, restMask, mgmtMask, outGDB, "SLICE", 10, "hw10kCombo")
    
 if __name__ == '__main__':
    main()  
