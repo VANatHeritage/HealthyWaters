@@ -293,19 +293,19 @@ def GetSubCatchments_hw(in_Lines, in_CatchArea, out_subCatch,
             continue
          print('Getting subcatchments for HU4 ' + vpuid + ', group ' + str(s) + '...')
 
-         # Watershed, convert to polygon
+         # Watershed, convert to polygon. All are written to the temp GDB
          catsub = temp + os.sep + 'catSub_' + str(vpuid) + '_' + str(s)
          arcpy.PolylineToRaster_conversion(flow_lyr, uid, temp + os.sep + 'pp_rast')
-         arcpy.sa.Watershed(fdr, temp + os.sep + 'pp_rast', "Value").save('wsrast')
+         arcpy.sa.Watershed(fdr, temp + os.sep + 'pp_rast', "Value").save(temp + os.sep + 'wsrast')
          arcpy.env.outputCoordinateSystem = in_CatchArea
          if pyvers < 3:
-            arcpy.RasterToPolygon_conversion('wsrast', catsub + '_poly0', "NO_SIMPLIFY", "Value")
-            arcpy.Dissolve_management(catsub + '_poly0', catsub + '_poly0d', 'gridcode')  # Not Necessary in Pro.
+            arcpy.RasterToPolygon_conversion(temp + os.sep + 'wsrast', temp + os.sep + 'poly0', "NO_SIMPLIFY", "Value")
+            arcpy.Dissolve_management(temp + os.sep + 'poly0', temp + os.sep + 'poly0d', 'gridcode')  # Not Necessary in Pro.
          else:
-            arcpy.RasterToPolygon_conversion('wsrast', catsub + '_poly0d', "NO_SIMPLIFY", "Value", "MULTIPLE_OUTER_PART")
-         arcpy.Identity_analysis(catsub + '_poly0d', cat, catsub + '_poly1')
-         arcpy.Select_analysis(catsub + '_poly1', catsub + '_final', 'gridcode = ' + uid)
-         ls_sub.append(catsub + '_final')
+            arcpy.RasterToPolygon_conversion(temp + os.sep + 'wsrast', temp + os.sep + 'poly0d', "NO_SIMPLIFY", "Value", "MULTIPLE_OUTER_PART")
+         arcpy.Identity_analysis(temp + os.sep + 'poly0d', cat, temp + os.sep + 'poly1')
+         arcpy.Select_analysis(temp + os.sep + 'poly1', catsub, 'gridcode = ' + uid)
+         ls_sub.append(catsub)
 
    # merge VPUID datasets
    arcpy.env.extent = None
@@ -489,39 +489,6 @@ def main():
       out_Lines = 'hw_Flowline_' + str(km) + 'km'
       in_lyrUpTrace = MakeServiceLayer_hw(in_hydroNet, up_Dist, dams)
       GetNetworks_hw(in_Points, in_lyrUpTrace, in_hydroNet, out_Lines, in_Catchment)
-
-
-   # Set up variables
-   gdb = 'E:/git/ConsVision_WatershedModel/inputs/Water_Sources_2020_watersheds_DCRedit.gdb'
-   if not os.path.exists(gdb):
-      arcpy.CreateFileGDB_management(os.path.dirname(gdb), os.path.basename(gdb))
-   else:
-      print(gdb + ' already exists.')
-   arcpy.env.workspace = gdb
-
-   # Use original points, copy to geodatabase
-   # NOTE: process points as necessary in ArcGIS, then use query on 'lyr' for ones that should get watersheds
-   in_Points0 = r'E:\git\ConsVision_WatershedModel\inputs\Water_Sources_2020_watersheds.gdb\Water_Sources_2020_edit'
-   in_Points = os.path.basename(in_Points0).replace('.shp', '')
-   lyr = arcpy.MakeFeatureLayer_management(in_Points0, where_clause="WATER_TYPE IN ('SW')")  # AND DATE_LOC_C IS NOT NULL")
-   arcpy.CopyFeatures_management(lyr, in_Points)
-
-   # Hydro network and catchments
-   in_hydroNet = r'E:\projects\nhd_network\network_datasets\VA_HydroNetHR.gdb\HydroNet\HydroNet_ND'
-   in_Catchment = r'E:\projects\nhd_network\network_datasets\VA_HydroNetHR.gdb\NHDPlusCatchment'
-   dams = False  # whether to include dams as barriers or not
-
-   # distances(km)/naming combinations, to loop over
-   kms = [[8.04672, '5mile'], [540, 'fullWs']]
-
-   # loop over distances
-   # NOTE: After review, 200m snap distances appears reasonable.
-   for km in kms:
-      up_Dist = km[0] * 1000
-      out_Lines = 'WS_FlowNetwork_' + km[1]
-      in_lyrUpTrace = MakeServiceLayer_hw(in_hydroNet, up_Dist, dams)
-      GetNetworks_hw(in_Points, in_lyrUpTrace, in_hydroNet, out_Lines, in_Catchment,
-                     in_Points_id='TINWSF_IS_', snap_dist="200 Meters", get_SubCat=True)
 
 
 if __name__ == '__main__':
