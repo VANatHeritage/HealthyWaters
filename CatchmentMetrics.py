@@ -1,6 +1,10 @@
 #----------------------------------------------------
 # Name: Catchment Zonal summaries
-#  This script summarizes metrics (land cover, crops, road crossings, etc.) within catchments.
+#  This script summarizes metrics (land cover, crops, road crossings, pollutants, etc.) within catchments.
+#  The general workflow is to (1) loop over catchment types (subCatchments and catchments), (2) loop over years (for
+#  multi-temporal datasets), (3) loop over stream buffers, and (4) loop over datasets in a group processed in the same
+#  way (e.g. land cover). Summary metrics are ouptut to 'Catchment geodatabases', one for each temporal group (2016,
+#  2011, 2006, 2001, and noYear, for those datasets not tied to a specific year).
 # Version: ArcPro / Python 3+
 # Date Created: 3-5-20
 # Authors: Hannah Huggins / David Bucklin
@@ -35,7 +39,7 @@ def cat_join(cat_tab, cat_id, join_tab, join_id, fld_suffix=""):
 
    flds = [a.name for a in arcpy.ListFields(join_tab)]
    # TODO: update prefixes as needed
-   fld = [f for f in flds if f.startswith(('perc', 'area', 'dens', 'leng', 'num', 'freq', 'sum'))]
+   fld = [f for f in flds if f.startswith(('perc', 'area', 'dens', 'leng', 'num', 'freq', 'sum', 'avg'))]
    if fld_suffix != "":
       for f in fld:
          arcpy.AlterField_management(join_tab, f, f + fld_suffix, clear_field_alias=True)
@@ -160,7 +164,7 @@ if not arcpy.Exists(in_Catchments):
 in_subCatchments0 = r"E:\git\HealthyWaters\inputs\watersheds\hw_watershed_nodams_20200528.gdb\hw_Flowline_subCatchArea"
 # unique ID for sub-Catchments = same as unique INSTAR ID.
 subcatID = 'OBJECTID_in_Points'
-# make subCatchment zone rasters/features (re-run if the subCatchments are updated)
+# make subCatchment zone rasters/features (needs re-run if the subCatchments are updated)
 in_subCatchments = src_gdb + os.sep + 'subCat_rast'
 if not arcpy.Exists(in_subCatchments):
    arcpy.PolygonToRaster_conversion(in_subCatchments0, subcatID, in_subCatchments)
@@ -184,7 +188,7 @@ cattype = [[in_subCatchments, subcatID, 'subCatchments', 'Value', os.path.basena
    # 4. over stream buffers (alters the zones dataset)
 # Step 1 is always used, while steps 2-4 are dependent on the dataset.
 
-# END HEADER
+### END HEADER
 
 
 ### NLCD (land cover, impervious, canopy)
@@ -235,15 +239,14 @@ for t in cattype:
 # end NLCD
 
 
-### Pollutant loads (these are for 2016). Unit is mg.
-ws = r'E:\git\HealthyWaters\inputs\catchments\catMetrics_2016.gdb'
-make_catGDB(ws, in_Catchments0, in_subCatchments0)
-arcpy.env.workspace = ws
-ls = [[r'L:\David\projects\HealthyWaters_WatershedModel\Raster\LocMass_N_2016.tif', 'sumN'],
-      [r'L:\David\projects\HealthyWaters_WatershedModel\Raster\LocMass_P_2016.tif', 'sumP'],
-      [r'L:\David\projects\HealthyWaters_WatershedModel\Raster\LocMass_S_2016.tif', 'sumS'],
-      [r'L:\David\projects\HealthyWaters_WatershedModel\Raster\altSedYld_2016.tif', 'sumSEDALT'],
-      [r'L:\David\projects\HealthyWaters_WatershedModel\Raster\SedYld_2016.tif', 'sumSED']]
+# Zonal summarizing SUM of raster `G:\SWAPSPACE\hwProducts_20200731.gdb\SedYld_2001` in zones `E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\subCat_rast`...
+
+
+### Pollutant loads
+# For N/P/S, Unit is mg.
+# For Sediment yields, there are two versions (SedYld and altSedYld, using different calculations).
+# pollutant raster geodatabase
+poll_gdb = r'G:\SWAPSPACE\hwProducts_20200731.gdb'
 
 for t in cattype:
    c = t[0]
@@ -252,23 +255,41 @@ for t in cattype:
    czn = t[3]
    cjn = t[4]
    print('Working on ' + cnm + '...')
-   # Loop over datasets
-   for i in ls:
-      r = i[0]
-      varname = i[1]
-      for buff in buffs:
-         print('Working on `' + varname + '` for buffer size: ' + buff)
-         if buff != "":
-            # change zone raster to the buffer-only versions
-            if cnm == 'subCatchments':
-               c1 = fdbuff + buff + '_subCatRast'
+
+   ### NLCD Variables: loop over years
+   for year in years:
+
+      # get list of datasets, by year
+      ls = [[poll_gdb + os.sep + 'LocMass_Nitrogen_' + year, 'sumN'],
+            [poll_gdb + os.sep + 'LocMass_Phosphorus_' + year, 'sumP'],
+            [poll_gdb + os.sep + 'LocMass_SuspSolids_' + year, 'sumS'],
+            [poll_gdb + os.sep + 'SedYld_' + year, 'sumSED'],
+            [poll_gdb + os.sep + 'altSedYld_' + year, 'sumSEDALT'],
+            [poll_gdb + os.sep + 'runoffDepth_' + year, 'depRUNOFF']]
+      # Create file GDB (one for each year), catchment copies
+      ws = r'E:\git\HealthyWaters\inputs\catchments\catMetrics_' + year + '.gdb'
+      make_catGDB(ws, in_Catchments0, in_subCatchments0)
+      arcpy.env.workspace = ws
+
+      for i in ls:
+         r = i[0]
+         if not arcpy.Exists(r):
+            print('Dataset `' + r + '` does not exist.')
+            continue
+         varname = i[1]
+         for buff in buffs:
+            print('Working on `' + varname + '` for buffer size: ' + buff)
+            if buff != "":
+               # change zone raster to the buffer-only versions
+               if cnm == 'subCatchments':
+                  c1 = fdbuff + buff + '_subCatRast'
+               else:
+                  c1 = fdbuff + buff + '_catRast'
             else:
-               c1 = fdbuff + buff + '_catRast'
-         else:
-            c1 = c
-         # Get zonal statistics (SUM, no mask)
-         add_zs(c1, czn, r, varname, "SUM", varname)
-         cat_join(cjn, cid, varname, czn, buff)
+               c1 = c
+            # Get zonal statistics (SUM, no mask)
+            add_zs(c1, czn, r, varname, "SUM", varname)
+            cat_join(cjn, cid, varname, czn, buff)
 
 
 ### Non year-specific variables
@@ -329,7 +350,7 @@ stream = r'L:\David\GIS_data\NHDPlus_HR\NHDPlus_HR_Virginia.gdb\NHDFlowline'
 
 # Loop over catchments
 for t in cattype:
-   # These are vector analyses, so change the zones to the original features instead of rasters
+   # These are vector analyses, so change the zones to the original features instead of catchment zone rasters
    if t[2] == 'Catchments':
       c = in_Catchments0
    else:

@@ -66,6 +66,7 @@ if not arcpy.Exists(cat_master):
    arcpy.env.outputCoordinateSystem = template_raster
    arcpy.FeatureClassToFeatureClass_conversion(cat_orig, gdb, cat_master)
 # TODO: manually edit `cat_master` feature class now, prior to continuing. See notes above.
+
 if 'catID' not in [a.name for a in arcpy.ListFields(cat_master)]:
    arcpy.PairwiseBuffer_analysis(cat_master, 'NHDPlusCatchment_metrics_1kmBuff', "1000 Meters",
                                  dissolve_option="ALL")
@@ -140,7 +141,7 @@ for l in ls:
       process_rasters(in_raster, template_raster, l[0], set_to_null)
       print("The output `" + l[0] + "` has been created.")
 
-# CDL: Custom frequency rasters from original CDL by year
+# CDL: Create Custom frequency rasters from original CDL by year
 cdl = r'L:\David\GIS_data\USDA_NASS\CDL'
 if not os.path.exists(cdl + os.sep + 'cdl_processing.gdb'):
    arcpy.CreateFileGDB_management(cdl, 'cdl_processing.gdb')
@@ -154,7 +155,6 @@ ls = [[os.path.basename(a)[0:8].lower(), a] for a in ls0]
 ls_sum = []
 arcpy.env.snapRaster = ls[0][1]
 arcpy.env.cellSize = ls[0][1]
-
 # loop over types (output name, query)
 types = [['pasturehay', 'Value IN (37, 176)']]  # add to list if needed
 for t in types:
@@ -178,7 +178,6 @@ for l in ls:
       process_rasters(in_raster, template_raster, l[0])
       print("The output `" + l[0] + "` has been created.")
 
-
 # Roads
 # Road-crossings
 # Note: added the individual counties here to complete coverage missing from the base all_centerline feature class
@@ -190,14 +189,13 @@ rcl = [r'E:\RCL_cost_surfaces\Tiger_2018\roads_proc.gdb\all_centerline',
        r'L:\David\projects\RCL_processing\Tiger_2018\data\unzip\tl_2018_24011_roads.shp',
        r'L:\David\projects\RCL_processing\Tiger_2018\data\unzip\tl_2018_37055_roads.shp']
 stream = r'L:\David\GIS_data\NHDPlus_HR\NHDPlus_HR_Virginia.gdb\NHDFlowline'
-
-# These are for vector-only analyses in LandcoverMetrics.py
+# These are for vector-only analyses in CatchmentMetrics.py
 arcpy.env.outputCoordinateSystem = template_raster
 arcpy.env.parallelProcessingFactor = "75%"
 out = 'rcl'
 if not arcpy.Exists(out):
    arcpy.Merge_management(rcl, out)
-
+# Create road crossing feature class
 out = 'rdcrs1'
 if not arcpy.Exists(out):
    arcpy.PairwiseIntersect_analysis(['rcl', stream], 'rdcrs0', 'ONLY_FID', output_type='Point')
