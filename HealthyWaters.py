@@ -37,7 +37,7 @@
 # ----------------------------------------------------------------------------------------
 
 # Import modules
-from Helper import *
+from HelperPro import *
 
 
 def MakeServiceLayer_hw(in_hydroNet, up_Dist, dams=True):
@@ -444,7 +444,7 @@ def GetNetworks_hw(in_Points, in_lyrUpTrace, in_hydroNet, out_Lines,
 
    # timestamp
    t1 = time.time()
-   ds = GetElapsedTime(t0, t1)
+   ds = GetElapsedHours(t0, t1)
    printMsg('Completed function. Time elapsed: %s' % ds)
 
    arcpy.CheckInExtension("Network")
