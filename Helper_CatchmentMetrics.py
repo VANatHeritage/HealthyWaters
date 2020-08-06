@@ -1,7 +1,8 @@
 #----------------------------------------------------
-# Functions and header processes for CatchmentMetrics.py, which completes zonal summaries.
-#  for all datasets. The processes completed in this script are limited to setting up variables
-#  in Catchment metrics, and creating raster versions of the catchments, if they don't exist.
+# Purpose: Functions and header processes for CatchmentMetrics.py, which completes catchment zonal summaries
+# for all datasets. The processes completed in this script are limited to setting up variables
+# in catchment metrics, and creating raster versions of the catchments, if they don't exist.
+#
 # Version: ArcPro / Python 3+
 # Date Created: 8-3-2020
 # Authors: David Bucklin
@@ -13,6 +14,22 @@ import os
 arcpy.CheckOutExtension("Spatial")
 
 
+def make_catGDB(gdb, cat, subCat):
+
+   if not arcpy.Exists(cat) or not arcpy.Exists(subCat):
+      print('Catchment/subCatchment feature classes do not exist.')
+      return
+   if not os.path.exists(gdb):
+      print('Making new geodatabase `' + gdb + '`...')
+      arcpy.CreateFileGDB_management(os.path.dirname(gdb), os.path.basename(gdb))
+      arcpy.CopyFeatures_management(cat, gdb + os.sep + os.path.basename(cat))
+      arcpy.CopyFeatures_management(subCat, gdb + os.sep + os.path.basename(subCat))
+      print('Geodatabase and catchment feature classes created.')
+   else:
+      print('Geodatabase `' + gdb + '` already exists, will add metrics to existing feature classes.')
+   return
+
+
 def add_zs(in_Zone, zone_field, in_raster, out_Tab, stat="MEAN", fld_name=None, mask=None):
    """This function is a wrapper around ZonalStatisticsAsTable, allowing to set a mask just for the summary,
    and change the name of the summary field."""
@@ -21,38 +38,13 @@ def add_zs(in_Zone, zone_field, in_raster, out_Tab, stat="MEAN", fld_name=None, 
    if mask:
       envmask = arcpy.env.mask
       arcpy.env.mask = mask
+      print("Using mask `" + mask + "`...")
    arcpy.sa.ZonalStatisticsAsTable(in_Zone, zone_field, in_raster, out_Tab, "DATA", stat)
    if fld_name:
       arcpy.AlterField_management(out_Tab, stat, fld_name, clear_field_alias=True)
    if mask:
       arcpy.env.mask = envmask
    return out_Tab
-
-
-def cat_join(cat_tab, cat_id, join_tab, join_id, fld_suffix=""):
-   """Joins summarized table to master catchment feature class, by selecting fields to
-   join (based on the field prefix), optionally adding a suffix (i.e. buffer size) to the joined field names, and
-   deleting join_tab following the join."""
-
-   flds = [a.name for a in arcpy.ListFields(join_tab)]
-   # TODO: update prefixes as needed
-   fld = [f for f in flds if f.startswith(('perc', 'area', 'dens', 'leng', 'num', 'freq', 'sum'))]
-   if fld_suffix != "":
-      for f in fld:
-         arcpy.AlterField_management(join_tab, f, f + fld_suffix, clear_field_alias=True)
-      fld = [f + fld_suffix for f in fld]
-   print('Joining fields : [' + ', '.join(fld) + ']')
-   if len(fld) == 0:
-      print('No fields to join.')
-      return
-   fld_exist = [f.name for f in arcpy.ListFields(cat_tab) if f.name in fld]
-   if len(fld_exist) > 0:
-      print("Removing existing fields...")
-      for f in fld_exist:
-         arcpy.DeleteField_management(cat_tab, f)
-   arcpy.JoinField_management(cat_tab, cat_id, join_tab, join_id, fld)
-   arcpy.Delete_management(join_tab)
-   return cat_tab
 
 
 def add_NLCD_LCmetrics(in_Zone, out_Tab, in_LandCover, zone_field='Value', class_field='Value'):
@@ -109,21 +101,33 @@ def add_NLCD_LCmetrics(in_Zone, out_Tab, in_LandCover, zone_field='Value', class
    return out_Tab
 
 
-def make_catGDB(gdb, cat, subCat):
+def cat_join(cat_tab, cat_id, join_tab, join_id, fld_suffix=""):
+   """Joins summarized table to master catchment feature class, by selecting fields to
+   join (based on the field prefix), optionally adding a suffix (i.e. buffer size) to the joined field names, and
+   deleting join_tab following the join."""
 
-   if not arcpy.Exists(cat) or not arcpy.Exists(subCat):
-      print('Catchment/subCatchment feature classes do not exist.')
+   flds = [a.name for a in arcpy.ListFields(join_tab)]
+   # TODO: update prefixes as needed
+   fld = [f for f in flds if f.startswith(('perc', 'area', 'dens', 'leng', 'num', 'avg'))]  # 'sum', 'freq'
+   if fld_suffix != "":
+      for f in fld:
+         arcpy.AlterField_management(join_tab, f, f + fld_suffix, clear_field_alias=True)
+      fld = [f + fld_suffix for f in fld]
+   if len(fld) == 0:
+      print('No fields to join.')
       return
-   if not os.path.exists(gdb):
-      print('Making new geodatabase `' + gdb + '`...')
-      arcpy.CreateFileGDB_management(os.path.dirname(gdb), os.path.basename(gdb))
-      arcpy.CopyFeatures_management(cat, gdb + os.sep + os.path.basename(cat))
-      arcpy.CopyFeatures_management(subCat, gdb + os.sep + os.path.basename(subCat))
-      print('Geodatabase and catchment feature classes created.')
-   else:
-      print('Geodatabase `' + gdb + '` already exists, will add metrics to existing feature classes.')
-   return
+   print('Joining fields : [' + ', '.join(fld) + '] to dataset `' + cat_tab + '`.')
+   fld_exist = [f.name for f in arcpy.ListFields(cat_tab) if f.name in fld]
+   if len(fld_exist) > 0:
+      print("Removing existing fields...")
+      for f in fld_exist:
+         arcpy.DeleteField_management(cat_tab, f)
+   arcpy.JoinField_management(cat_tab, cat_id, join_tab, join_id, fld)
+   arcpy.Delete_management(join_tab)
+   return cat_tab
 
+
+### Global variables/settings. Includes preparation of subCatchment zonal rasters, if they don't exist
 
 # Source geodatabase for input rasters
 src_gdb = r'E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb'
@@ -165,8 +169,11 @@ if not arcpy.Exists(in_subCatchments):
    arcpy.PolygonToRaster_conversion(in_subCatchments0, subcatID, in_subCatchments)
    for b in buffs[1:4]:
       print(b)
+      # Note: decided to use the 'inclWater' version, as of 2020-08-04
       out = fdbuff + b + '_subCatRast'
       arcpy.sa.ExtractByMask(in_subCatchments, fdbuff + b + '_catRast').save(out)
+      out = fdbuff + b + '_subCatRast_inclWater'
+      arcpy.sa.ExtractByMask(in_subCatchments, fdbuff + b + '_catRast_inclWater').save(out)
       out = fdbuff + b + '_subCatFeat'
       arcpy.Clip_analysis(in_subCatchments0, fdbuff + b + '_catFeat', out)
 
@@ -176,4 +183,4 @@ if not arcpy.Exists(in_subCatchments):
 cattype = [[in_Catchments, catID, 'Catchments', 'Value', os.path.basename(in_Catchments0)],
            [in_subCatchments, subcatID, 'subCatchments', 'Value', os.path.basename(in_subCatchments0)]]
 
-### END HEADER
+### END

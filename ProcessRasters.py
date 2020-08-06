@@ -1,7 +1,14 @@
 #----------------------------------------------------
 # Purpose: Process Rasters for use in catchment summaries.
-#  This script standardizes rasters to the NHDPlusHR raster projection, snap, and cell size. It will also
-#  mask and crop the rasters to the extent, defined by a 1-km buffer around project catchments.
+#
+# This script covers preparation work for catchment zonal summaries. This includes
+# creating a master catchment feature class and zonal raster, used in zonal summaries. A
+# template raster and feature is also created, based on a 1-km buffer around input catchments.
+#
+# The main body of the script covers processing for specific input (environmental variable)
+# datasets, including standardizing to the NHDPlusHR raster projection, snap, cell size, extent,
+# and mask.
+#
 # Version: ArcPro / Python 3+
 # Date Created: 3-12-20
 # Authors: Hannah Huggins/David Bucklin
@@ -107,7 +114,7 @@ for l in ls:
       process_rasters(in_raster, template_raster, l[0])
       print("The output `" + l[0] + "` has been created.")
       # create water masks
-      arcpy.sa.SetNull(l[0], 1, "Value = 11").save(l[0] + '_nowater')
+      arcpy.sa.SetNull(l[0] + '_proj', 1, "Value = 11").save(l[0] + '_watermask')
 
 # Impervious rasters
 ls = [['imp_2016', r'L:\David\GIS_data\NLCD\NLCD_Impervious_L48_20190405_full_zip\NLCD_2016_Impervious_L48_20190405.img'],

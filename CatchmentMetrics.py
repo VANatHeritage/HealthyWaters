@@ -1,10 +1,18 @@
 #----------------------------------------------------
-# Name: Catchment Zonal summaries
-#  This script summarizes metrics (land cover, crops, road crossings, pollutants, etc.) within catchments.
-#  The general workflow is to (1) loop over catchment types (subCatchments and catchments), (2) loop over years (for
-#  multi-temporal datasets), (3) loop over stream buffers, and (4) loop over datasets in a group processed in the same
-#  way (e.g. land cover). Summary metrics are output to 'Catchment geodatabases', one for each temporal group: 2016,
-#  2011, 2006, 2001, and noYear, for those datasets not tied to a specific year.
+# Purpose: Catchment Zonal summaries
+#
+# This script summarizes metrics (land cover, crops, road crossings, pollutants, etc.) within catchments.
+# Summary metrics are output to 'catchment geodatabases', one for each temporal group: 2016,
+# 2011, 2006, 2001. Datasets not tied to a specific year should be added to the latest temporal gdb (2016).
+#
+# Catchment variables should begin with one of the following prefixes:
+#  perc: represents percent coverage of an attribute (e.g. land cover type)
+#  avg: represents an average value of an attribute across the catchment
+#  dens: represents the density of an attribute (normalized by square kilometers)
+#  area: Raw area value (square meters)
+#
+# A land-only mask (derived from NLCD) is used for most of the zonal summaries.
+#
 # Version: ArcPro / Python 3+
 # Date Created: 3-5-20
 # Authors: Hannah Huggins / David Bucklin
@@ -21,7 +29,7 @@ from Helper_CatchmentMetrics import *
 # Step 1 is always used, while steps 2-4 are dependent on the dataset.
 
 ### NLCD (land cover, impervious, canopy)
-
+# DONE: redo buffered versions (only) with inclWater rasters.
 for t in cattype:
    c = t[0]
    cid = t[1]
@@ -42,7 +50,7 @@ for t in cattype:
       in_LandCover = src_gdb + os.sep + "lc_" + year + "_proj"
       in_canopy = src_gdb + os.sep + "treecan_" + year + "_proj"
       in_imp = src_gdb + os.sep + "imp_" + year + "_proj"
-      mask = src_gdb + os.sep + "lc_" + year + "_nowater"
+      mask = src_gdb + os.sep + "lc_" + year + "_watermask"
 
       # Loop over buffers
       for buff in buffs:
@@ -50,31 +58,26 @@ for t in cattype:
          if buff != "":
             # change zone raster to the buffer-only versions
             if cnm == 'subCatchments':
-               c1 = fdbuff + buff + '_subCatRast'
+               c1 = fdbuff + buff + '_subCatRast_inclWater'
             else:
-               c1 = fdbuff + buff + '_catRast'
+               c1 = fdbuff + buff + '_catRast_inclWater'
          else:
             c1 = c
 
          # Calculate and join metrics
-         add_NLCD_LCmetrics(c1, 'lc_table_' + cnm + buff, in_LandCover, zone_field=czn)
-         cat_join(cjn, cid, 'lc_table_' + cnm + buff, czn, buff)
+         add_NLCD_LCmetrics(c1, 'tmp_lc_table', in_LandCover, zone_field=czn)
+         cat_join(cjn, cid, 'tmp_lc_table', czn, buff)
          # NOTE: no NLCD canopy data for 2001, 2006
          if arcpy.Exists(in_canopy):
-            add_zs(c1, czn, in_canopy, 'canopy_' + cnm + buff, "MEAN", 'percCAN', mask)
-            cat_join(cjn, cid, 'canopy_' + cnm + buff, czn, buff)
-         add_zs(c1, czn, in_imp, 'imp_' + cnm + buff, "MEAN", 'percIMP', mask)
-         cat_join(cjn, cid, 'imp_' + cnm + buff, czn, buff)
+            add_zs(c1, czn, in_canopy, 'tmp_canopy', "MEAN", 'percCAN', mask)
+            cat_join(cjn, cid, 'tmp_canopy', czn, buff)
+         add_zs(c1, czn, in_imp, 'tmp_imp', "MEAN", 'percIMP', mask)
+         cat_join(cjn, cid, 'tmp_imp', czn, buff)
 # end NLCD
 
-
-# Zonal summarizing SUM of raster `G:\SWAPSPACE\hwProducts_20200731.gdb\SedYld_2001` in zones `E:\git\HealthyWaters\inputs\catchments\catchment_inputData.gdb\subCat_rast`...
-
-
 ### Pollutant loads
-# For N/P/S, Unit is mg.
-# For Sediment yields, there are two versions (SedYld and altSedYld, using different calculations).
-# pollutant raster geodatabase
+# For N/P/S, Unit is mg. There are two versions of sediment yield (SedYld and altSedYld, using different calculations).
+# The land-only mask is used for these analyses.
 poll_gdb = r'G:\SWAPSPACE\hwProducts_20200731.gdb'
 
 for t in cattype:
@@ -85,18 +88,19 @@ for t in cattype:
    cjn = t[4]
    print('Working on ' + cnm + '...')
 
-   ### NLCD Variables: loop over years
+   # loop over years
    for year in years:
 
       # get list of datasets, by year
-      ls = [[poll_gdb + os.sep + 'LocMass_Nitrogen_' + year, 'sumN'],
-            [poll_gdb + os.sep + 'LocMass_Phosphorus_' + year, 'sumP'],
-            [poll_gdb + os.sep + 'LocMass_SuspSolids_' + year, 'sumS'],
-            [poll_gdb + os.sep + 'SedYld_' + year, 'sumSED'],
-            [poll_gdb + os.sep + 'altSedYld_' + year, 'sumSEDALT'],
-            [poll_gdb + os.sep + 'runoffDepth_' + year, 'sumRUNOFF']]
+      ls = [[poll_gdb + os.sep + 'LocMass_Nitrogen_' + year, 'avgN'],
+            [poll_gdb + os.sep + 'LocMass_Phosphorus_' + year, 'avgP'],
+            [poll_gdb + os.sep + 'LocMass_SuspSolids_' + year, 'avgS'],
+            [poll_gdb + os.sep + 'SedYld_' + year, 'avgSED'],
+            [poll_gdb + os.sep + 'altSedYld_' + year, 'avgSEDALT'],
+            [poll_gdb + os.sep + 'runoffDepth_' + year, 'avgRUNOFF']]
       # Create file GDB (one for each year), catchment copies
       ws = r'E:\git\HealthyWaters\inputs\catchments\catMetrics_' + year + '.gdb'
+      mask = src_gdb + os.sep + "lc_" + year + "_watermask"
       make_catGDB(ws, in_Catchments0, in_subCatchments0)
       arcpy.env.workspace = ws
 
@@ -105,39 +109,40 @@ for t in cattype:
          if not arcpy.Exists(r):
             print('Dataset `' + r + '` does not exist.')
             continue
-         varname = i[1]
          for buff in buffs:
-            print('Working on `' + varname + '` for buffer size: ' + buff)
+            print('Working on `' + i[1] + '` for buffer size: ' + buff)
             if buff != "":
                # change zone raster to the buffer-only versions
                if cnm == 'subCatchments':
-                  c1 = fdbuff + buff + '_subCatRast'
+                  c1 = fdbuff + buff + '_subCatRast_inclWater'
                else:
-                  c1 = fdbuff + buff + '_catRast'
+                  c1 = fdbuff + buff + '_catRast_inclWater'
             else:
                c1 = c
-            # Get zonal statistics (SUM, no mask)
-            add_zs(c1, czn, r, varname, "SUM", varname)
-            cat_join(cjn, cid, varname, czn, buff)
+            # Get zonal statistics (MEAN)
+            add_zs(c1, czn, r, i[1], "MEAN", i[1], mask=mask)
+            cat_join(cjn, cid, i[1], czn, buff)
 
 
-### Non year-specific variables
+### Non year-specific variables (add these to latest year GDB: 2016)
 
 # Set up geodatabase
-ws = r'E:\git\HealthyWaters\inputs\catchments\catMetrics_noYear.gdb'
+ws = r'E:\git\HealthyWaters\inputs\catchments\catMetrics_2016.gdb'
 make_catGDB(ws, in_Catchments0, in_subCatchments0)
 arcpy.env.workspace = ws
+# pollutant GDB
+poll_gdb = r'G:\SWAPSPACE\hwProducts_20200731.gdb'
+# Some of these use the open water mask; use the NLCD 2016 version
+mask = src_gdb + os.sep + "lc_2016_watermask"
 
+### List all non-year specific rasters here [raster, variable name, statistic, mask]
+ls = [[src_gdb + os.sep + 'pasturefreq', 'avgPASTURE', "MEAN", mask],
+      [src_gdb + os.sep + 'cornfreq', 'avgCORN', "MEAN", mask],
+      [src_gdb + os.sep + 'cottonfreq', 'avgCOTTON', "MEAN", mask],
+      [src_gdb + os.sep + 'soyfreq', 'avgSOY', "MEAN", mask],
+      [src_gdb + os.sep + 'wheatfreq', 'avgWHEAT', "MEAN", mask],
+      [poll_gdb + os.sep + 'maxPrecip_gen24_topo10', 'avgMAXPREC', "MEAN", None]]
 
-### Crop frequencies
-# Loop over crop frequency rasters
-ls = [[src_gdb + os.sep + 'pasturefreq', 'freqPASTURE'],
-      [src_gdb + os.sep + 'cornfreq', 'freqCORN'],
-      [src_gdb + os.sep + 'cottonfreq', 'freqCOTTON'],
-      [src_gdb + os.sep + 'soyfreq', 'freqSOY'],
-      [src_gdb + os.sep + 'wheatfreq', 'freqWHEAT']]
-# These use the open water mask; use the NLCD 2016 version
-mask = src_gdb + os.sep + "lc_2016_nowater"
 for t in cattype:
    c = t[0]
    cid = t[1]
@@ -147,27 +152,28 @@ for t in cattype:
    print('Working on ' + cnm + '...')
    for i in ls:
       r = i[0]
-      varname = i[1]
       for buff in buffs:
          print('Working on `' + r + '` for buffer size: ' + buff)
          if buff != "":
             # change zone raster to the buffer-only versions
             if cnm == 'subCatchments':
-               c1 = fdbuff + buff + '_subCatRast'
+               c1 = fdbuff + buff + '_subCatRast_inclWater'
             else:
-               c1 = fdbuff + buff + '_catRast'
+               c1 = fdbuff + buff + '_catRast_inclWater'
          else:
             c1 = c
-
          # Get zonal statistics
-         add_zs(c1, czn, r, varname, "MEAN", varname, mask)
-         cat_join(cjn, cid, r, czn, buff)
+         add_zs(c1, czn, r, i[1], i[2], i[1], i[3])
+         cat_join(cjn, cid, i[1], czn, buff)
 
 
 ### Roads
-# NOTE: These are all-vector analyses. Do not use the rasterized catchments
+# NOTE: These are all-vector analyses. They do not use the rasterized catchments
+# These require the areaLand variable(s) from NLCD to be in the output catchments table, to calculate density
+# See ProcessRasters.py for pre-processing steps with the RCL and Flowline data
+
 # Set up geodatabase
-ws = r'E:\git\HealthyWaters\inputs\catchments\catMetrics_noYear.gdb'
+ws = r'E:\git\HealthyWaters\inputs\catchments\catMetrics_2016.gdb'
 make_catGDB(ws, in_Catchments0, in_subCatchments0)
 arcpy.env.workspace = ws
 
@@ -179,14 +185,14 @@ stream = r'L:\David\GIS_data\NHDPlus_HR\NHDPlus_HR_Virginia.gdb\NHDFlowline'
 
 # Loop over catchments
 for t in cattype:
-   # These are vector analyses, so change the zones to the original features instead of catchment zone rasters
+   # These are vector analyses, so change the 'zones' to the original features instead of catchment zone rasters
    if t[2] == 'Catchments':
       c = in_Catchments0
    else:
       c = in_subCatchments0
    cid = t[1]
    cnm = t[2]
-   czn = t[3]
+   # zones not used
    cjn = t[4]
    print('Working on ' + cnm + '...')
 
@@ -194,7 +200,7 @@ for t in cattype:
    out = 'road_length'
    for buff in buffs:
       # These use the feature buffers. NOTE: Stream-area is included in the buffer (unlike rasters analyses)
-      print('Working on road length/density for buffer size: ' + buff)
+      print('Working on road length / density for buffer size: ' + buff)
       if buff != "":
          if cnm == 'subCatchments':
             c1 = fdbuff + buff + '_subCatFeat'
@@ -203,31 +209,33 @@ for t in cattype:
       else:
          c1 = c
 
-      if 'area_sqm' not in [a.name for a in arcpy.ListFields(c1)]:
-         arcpy.AddField_management(c1, 'area_sqm', 'DOUBLE')
-         arcpy.CalculateGeometryAttributes_management(c1, [['area_sqm', 'AREA']], area_unit='SQUARE_METERS')
-
       # Intersect and dissolve by catchment
       arcpy.PairwiseIntersect_analysis([c1, rcl], 'cat_rcl', 'NO_FID', output_type='LINE')
       # Dissolve is needed to remove overlapping roads
-      arcpy.PairwiseDissolve_analysis('cat_rcl', 'cat_rcl_diss0', [cid, 'area_sqm'])
-      # summarize road length and area
-      arcpy.Statistics_analysis('cat_rcl_diss0', out, [['Shape_Length', 'SUM'], ['area_sqm', 'MAX']], cid)
+      arcpy.PairwiseDissolve_analysis('cat_rcl', 'cat_rcl_diss0', [cid])
+      # summarize road length
+      arcpy.Statistics_analysis('cat_rcl_diss0', out, [['Shape_Length', 'SUM']], cid)
       arcpy.AddField_management(out, 'lengRD', 'DOUBLE')
       arcpy.CalculateField_management(out, 'lengRD', '!SUM_Shape_Length! / 1000')
-      arcpy.AddField_management(out, 'densRD', 'DOUBLE')
-      arcpy.CalculateField_management(out, 'densRD', '!lengRD! / (!MAX_area_sqm! / 1000000)')
       cat_join(cjn, cid, out, cid, buff)
+      # calculate density (using areaLand in buffer)
+      arcpy.AddField_management(cjn, 'densRD' + buff, 'DOUBLE')
+      arcpy.CalculateField_management(cjn, 'densRD' + buff, '!lengRD' + buff + '! / (!areaLand' + buff + '! / 1000000)')
 
-   # Road crossings: number and density (number per sq km)
+   # Road crossings: count and density (number / sq km)
    out = 'roadcross_count'
-   print('Calculating road crossing density for ' + cjn + '...')
+   print('Calculating road crossing count / density for ' + cjn + '...')
    arcpy.SpatialJoin_analysis(rdcrs, c1, 'rdcrs_cat', "JOIN_ONE_TO_ONE", "KEEP_COMMON", match_option="INTERSECT")
-   arcpy.Statistics_analysis('rdcrs_cat', out, [[cid, 'COUNT'], ['area_sqm', 'MAX']], cid)
+   arcpy.Statistics_analysis('rdcrs_cat', out, [[cid, 'COUNT']], cid)
    arcpy.AlterField_management(out, 'COUNT_' + cid, 'numRDCRS', clear_field_alias=True)
-   arcpy.AddField_management(out, 'densRDCRS', 'DOUBLE')
-   arcpy.CalculateField_management(out, 'densRDCRS', '!numRDCRS! / (!MAX_area_sqm! / 1000000)', "PYTHON3")
    cat_join(cjn, cid, out, cid)
+   # calculate density (using areaLand). Added 'buffer' versions
+   arcpy.AddField_management(cjn, 'densRDCRS', 'DOUBLE')
+   arcpy.CalculateField_management(cjn, 'densRDCRS', '!numRDCRS! / (!areaLand! / 1000000)')
+   # coulddo: add buffer versions?
+   # for buff in buffs:
+   #    arcpy.AddField_management(cjn, 'densRDCRS' + buff, 'DOUBLE')
+   #    arcpy.CalculateField_management(cjn, 'densRDCRS', '!numRDCRS! / (!areaLand' + buff + '! / 1000000)')
 
 del_ls = ['cat_rcl', 'cat_rcl_diss0', 'rdcrs_cat']
 for d in del_ls:
