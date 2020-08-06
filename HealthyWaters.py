@@ -41,14 +41,14 @@ from HelperPro import *
 
 
 def MakeServiceLayer_hw(in_hydroNet, up_Dist, dams=True):
-   '''Creates a service layer needed to grab stream segments a specified distance upstream of network points.
+   """Creates a service layer needed to grab stream segments a specified distance upstream of network points.
    This function only needs to be run once for each distance specified. After that, the output layers can be reused
    repeatedly.
    Parameters:
    - in_hydroNet = Input hydrological network dataset (e.g., VA_HydroNet.gdb\HydroNet\HydroNet_ND)
    - up_Dist = The distance (in map units) to traverse upstream from a point along the network
    - dams = Whether dams should be included as barriers in the network analysis layer
-   '''
+   """
    arcpy.CheckOutExtension("Network")
 
    # Set up some variables
@@ -141,7 +141,10 @@ def GetCatchments_hw(in_Lines, in_Catchment, out_CatchArea, in_Points,
    out_CatchArea = Output network catchments feature class
    in_Points = original points
    ptid_join = Unique integer ID for each network, inherited from original points (in_Points)
+   catID = Unique integer ID for each catchment
+   get_SubCat = Boolean; calculate and replace initial catchment with precise subcatchment?
    """
+   out_scratch = arcpy.env.scratchGDB + os.sep
    # Use NHDPlusID to build a query. NHDPlusID is necessary for this.
    oids = set([str(int(a[0])) for a in arcpy.da.SearchCursor(in_Lines, catID)])
    oids = list(oids)
@@ -154,14 +157,17 @@ def GetCatchments_hw(in_Lines, in_Catchment, out_CatchArea, in_Points,
 
    # get/dissolve catchments associated with lines
    print('Getting associated catchments...')
-   catch_all = arcpy.SpatialJoin_analysis(cat_lyr, in_Lines,
-                                          out_feature_class=arcpy.env.scratchGDB + os.sep + 'cat_sj',
+   # ISSUE: Some flowlines do not have associated catchments (e.g canals). This will miss those catchments.
+   arcpy.SpatialJoin_analysis(cat_lyr, in_Lines, out_feature_class=out_scratch + 'cat_sj',
                                           join_operation="JOIN_ONE_TO_MANY",
                                           join_type="KEEP_COMMON",
                                           match_option="INTERSECT")
-   # Only want catchments matching corresponding flowlines
-   catch_full = arcpy.MakeFeatureLayer_management(catch_all, where_clause=catID + ' = ' + catID + '_1')
-   arcpy.CopyFeatures_management(catch_full, out_CatchArea + '_full')
+   # Only want catchments matching corresponding flowlines; also dissolve to reduce fields.
+   # query = catID + ' IS NOT NULL AND ' + catID + '_1 IS NOT NULL AND (' + catID + ' = ' + catID + '_1'
+   query = catID + ' = ' + catID + '_1'
+   catch_full = arcpy.MakeFeatureLayer_management(out_scratch + 'cat_sj', where_clause=query)
+   arcpy.Dissolve_management(catch_full, out_CatchArea + '_full', dissolve_field=[ptid_join, catID])
+   del catch_full
 
    # Sub-catchment routine
    if get_SubCat:
@@ -178,27 +184,28 @@ def GetCatchments_hw(in_Lines, in_Catchment, out_CatchArea, in_Points,
       arcpy.SelectLayerByAttribute_management(catch_full, "NEW_SELECTION", query)
       arcpy.DeleteRows_management(catch_full)
       arcpy.Append_management(out_subCat, out_CatchArea + '_full', "NO_TEST")
-      del cat_lyr
       del catch_full
    # end Sub-catchment routine
+   del cat_lyr
 
    print('Dissolving catchments...')
    arcpy.Dissolve_management(out_CatchArea + '_full', out_CatchArea, dissolve_field=ptid_join)
 
-   # get unaasociated catchments
-   assoc = ','.join([str(f[0]) for f in arcpy.da.SearchCursor(out_CatchArea, ptid_join)])
-   query = ptid_join + " NOT IN (" + assoc + ")"
+   # get unaasociated catchments (using lines instead of catchments...)
+   assoc = list(set([str(f[0]) for f in arcpy.da.SearchCursor(in_Lines, ptid_join)]))
+   query = ptid_join + " NOT IN (" + ','.join(assoc) + ")"
    pt_lyr = arcpy.MakeFeatureLayer_management(in_Points, where_clause=query)
 
-   if (int(arcpy.GetCount_management(pt_lyr)[0]) > 0):
+   if int(arcpy.GetCount_management(pt_lyr)[0]) > 0:
       printMsg('Adding catchments for points without networks...')
       cat_lyr = arcpy.MakeFeatureLayer_management(in_Catchment)
       arcpy.SelectLayerByLocation_management(cat_lyr, "INTERSECT", pt_lyr)
-      arcpy.SpatialJoin_analysis(cat_lyr, pt_lyr, 'catUnassoc', join_operation="JOIN_ONE_TO_MANY",
-                                 join_type="KEEP_COMMON", match_option="INTERSECT")
-      arcpy.Append_management('catUnassoc', out_CatchArea, "NO_TEST")
-      arcpy.Append_management('catUnassoc', out_CatchArea + '_full', "NO_TEST")
-      arcpy.Delete_management('catUnassoc')
+      arcpy.SpatialJoin_analysis(cat_lyr, pt_lyr, out_scratch + 'catUnassoc',
+                                 join_operation="JOIN_ONE_TO_MANY", join_type="KEEP_COMMON", match_option="INTERSECT")
+      arcpy.Dissolve_management(out_scratch + 'catUnassoc',
+                                out_scratch + 'catUnassoc1', dissolve_field=[ptid_join, catID])
+      arcpy.Append_management(out_scratch + 'catUnassoc1', out_CatchArea, "NO_TEST")
+      arcpy.Append_management(out_scratch + 'catUnassoc1', out_CatchArea + '_full', "NO_TEST")
       del pt_lyr, cat_lyr
 
    return out_CatchArea
@@ -223,21 +230,21 @@ def GetSubCatchments_hw(in_Lines, in_CatchArea, out_subCatch,
 
    print("Generating sub-catchment for initial pour points...")
    arcpy.CheckOutExtension("Spatial")
-   temp = arcpy.env.scratchGDB
+   out_scratch = arcpy.env.scratchGDB + os.sep
    arcpy.env.outputCoordinateSystem = in_CatchArea
    arcpy.env.extent = in_CatchArea
 
    # select the 'starting' flowline for each network, make a temporary FC
-   arcpy.Select_analysis(in_Lines, temp + os.sep + 'flow', "FromCumul_Length = 0")
-   flow = temp + os.sep + 'flow'
+   arcpy.Select_analysis(in_Lines, out_scratch + 'flow', "FromCumul_Length = 0")
+   flow = out_scratch + 'flow'
    # full catchments layer
    cat = arcpy.MakeFeatureLayer_management(in_CatchArea)
    # unique ID
    uid = ptid_join
 
    # Find cases of multiple points per catchment
-   arcpy.Statistics_analysis(flow, temp + os.sep + 'flowdup', [[catID, 'Count']], catID)
-   nids = [a for a in arcpy.da.SearchCursor(temp + os.sep + 'flowdup', [catID, 'COUNT_' + catID])]
+   arcpy.Statistics_analysis(flow, out_scratch + 'flowdup', [[catID, 'Count']], catID)
+   nids = [a for a in arcpy.da.SearchCursor(out_scratch + 'flowdup', [catID, 'COUNT_' + catID])]
    dupnid = [int(a[0]) for a in nids if a[1] > 1]
    seqs = list(range(1, max([a[1] for a in nids])+1))
    # add attribute seqID. Corresponds to sequence in a unique catchment.
@@ -259,8 +266,8 @@ def GetSubCatchments_hw(in_Lines, in_CatchArea, out_subCatch,
    # NOTE: some OIDs do not get a reach, generally since they are at the 'bottom' (pour point) of the catchment already
    query = '(' + ') OR ('.join([' AND '.join(b) for b in nid_oid]) + ')'
    arcpy.SelectLayerByAttribute_management(cat, "NEW_SELECTION", query)
-   arcpy.Dissolve_management(cat, temp + os.sep + "subWatershed_mask", "VPUID")
-   sub = temp + os.sep + "subWatershed_mask"
+   arcpy.Dissolve_management(cat, out_scratch + "subWatershed_mask", "VPUID")
+   sub = out_scratch + "subWatershed_mask"
    vpu = [a[0] for a in arcpy.da.SearchCursor(sub, 'VPUID')]
    catvpu = arcpy.MakeFeatureLayer_management(sub)
 
@@ -270,7 +277,7 @@ def GetSubCatchments_hw(in_Lines, in_CatchArea, out_subCatch,
    for vpuid in vpu:
       arcpy.env.extent = in_CatchArea
       arcpy.SelectLayerByAttribute_management(catvpu, "NEW_SELECTION", "VPUID = '" + str(vpuid) + "'")
-      arcpy.CopyFeatures_management(catvpu, temp + os.sep + 'msk')
+      arcpy.CopyFeatures_management(catvpu, out_scratch + 'msk')
 
       if vpuid.startswith('02'):
          fdr = fdr_src + os.sep + "HRNHDPlusRasters" + vpuid + os.sep + 'hydrofix.gdb/fdr_sinkfix'
@@ -283,8 +290,8 @@ def GetSubCatchments_hw(in_Lines, in_CatchArea, out_subCatch,
          arcpy.env.snapRaster = fdr
          arcpy.env.cellSize = fdr
          arcpy.env.outputCoordinateSystem = fdr
-         arcpy.env.extent = temp + os.sep + 'msk'
-         arcpy.env.mask = temp + os.sep + 'msk'
+         arcpy.env.extent = out_scratch + 'msk'
+         arcpy.env.mask = out_scratch + 'msk'
 
          # flowlines not necessary to select, since mask will filter them
          arcpy.SelectLayerByLocation_management(flow_lyr, "INTERSECT", catvpu, selection_type="NEW_SELECTION")
@@ -293,18 +300,18 @@ def GetSubCatchments_hw(in_Lines, in_CatchArea, out_subCatch,
             continue
          print('Getting subcatchments for HU4 ' + vpuid + ', group ' + str(s) + '...')
 
-         # Watershed, convert to polygon. All are written to the temp GDB
-         catsub = temp + os.sep + 'catSub_' + str(vpuid) + '_' + str(s)
-         arcpy.PolylineToRaster_conversion(flow_lyr, uid, temp + os.sep + 'pp_rast')
-         arcpy.sa.Watershed(fdr, temp + os.sep + 'pp_rast', "Value").save(temp + os.sep + 'wsrast')
+         # Watershed, convert to polygon. All are written to the out_scratch GDB
+         catsub = out_scratch + 'catSub_' + str(vpuid) + '_' + str(s)
+         arcpy.PolylineToRaster_conversion(flow_lyr, uid, out_scratch + 'pp_rast')
+         arcpy.sa.Watershed(fdr, out_scratch + 'pp_rast', "Value").save(out_scratch + 'wsrast')
          arcpy.env.outputCoordinateSystem = in_CatchArea
          if pyvers < 3:
-            arcpy.RasterToPolygon_conversion(temp + os.sep + 'wsrast', temp + os.sep + 'poly0', "NO_SIMPLIFY", "Value")
-            arcpy.Dissolve_management(temp + os.sep + 'poly0', temp + os.sep + 'poly0d', 'gridcode')  # Not Necessary in Pro.
+            arcpy.RasterToPolygon_conversion(out_scratch + 'wsrast', out_scratch + 'poly0', "NO_SIMPLIFY", "Value")
+            arcpy.Dissolve_management(out_scratch + 'poly0', out_scratch + 'poly0d', 'gridcode')  # Not Necessary in Pro.
          else:
-            arcpy.RasterToPolygon_conversion(temp + os.sep + 'wsrast', temp + os.sep + 'poly0d', "NO_SIMPLIFY", "Value", "MULTIPLE_OUTER_PART")
-         arcpy.Identity_analysis(temp + os.sep + 'poly0d', cat, temp + os.sep + 'poly1')
-         arcpy.Select_analysis(temp + os.sep + 'poly1', catsub, 'gridcode = ' + uid)
+            arcpy.RasterToPolygon_conversion(out_scratch + 'wsrast', out_scratch + 'poly0d', "NO_SIMPLIFY", "Value", "MULTIPLE_OUTER_PART")
+         arcpy.Identity_analysis(out_scratch + 'poly0d', cat, out_scratch + 'poly1')
+         arcpy.Select_analysis(out_scratch + 'poly1', catsub, 'gridcode = ' + uid)
          ls_sub.append(catsub)
 
    # merge VPUID datasets
@@ -318,9 +325,8 @@ def GetSubCatchments_hw(in_Lines, in_CatchArea, out_subCatch,
 
 
 def GetNetworks_hw(in_Points, in_lyrUpTrace, in_hydroNet, out_Lines,
-                   in_Catchment=None, catID="NHDPlusID", get_SubCat=True,
-                   in_Points_id=None, out_Scratch=arcpy.env.scratchGDB, snap_dist="50 Meters"):
-   '''Loads point(s), solves the upstream service layer to get lines, grabs catchments intersecting lines.
+                   in_Catchment=None, catID="NHDPlusID", get_SubCat=True, in_Points_id=None, snap_dist="50 Meters"):
+   """Loads point(s), solves the upstream service layer to get lines, grabs catchments intersecting lines.
     Outputs are two feature classes (dissolved lines and catchments, one feature per input point).
    Parameters:
    - in_Points = Input feature class representing sample point(s) along network
@@ -329,8 +335,8 @@ def GetNetworks_hw(in_Points, in_lyrUpTrace, in_hydroNet, out_Lines,
    - out_Lines = Output lines representing upstream flow to a specified distance from point
    - in_Catchment = Input catchment polygons layer, matching flowlines from in_hydroNet. Optional: if given, the
       catchments for the network will be output, using the naming scheme `[out_Lines]_catchArea`.
-   - out_Scratch = Geodatabase to contain intermediate outputs
-   '''
+   """
+   out_scratch = arcpy.env.scratchGDB + os.sep
    arcpy.CheckOutExtension("Network")
    nhdFlow = os.path.dirname(in_hydroNet) + os.sep + 'NHDFlowline'
    if not arcpy.Exists(nhdFlow):
@@ -361,9 +367,6 @@ def GetNetworks_hw(in_Points, in_lyrUpTrace, in_hydroNet, out_Lines,
    t0 = time.time()
 
    # Set up some variables
-   if out_Scratch == "in_memory":
-      # recast to save to disk, otherwise there is no OBJECTID field for queries as needed
-      out_Scratch = arcpy.env.scratchGDB
    printMsg('Casting strings to layer objects...')
    if pyvers < 3:
       in_upTrace = arcpy.mapping.Layer(in_lyrUpTrace)
@@ -371,7 +374,7 @@ def GetNetworks_hw(in_Points, in_lyrUpTrace, in_hydroNet, out_Lines,
       in_lyrUpTrace = in_lyrUpTrace + 'x'
       in_upTrace = in_lyrUpTrace
       # in_upTrace = arcpy.mp.LayerFile(in_lyrUpTrace)
-   upLines = out_Scratch + os.sep + 'upLines'
+   upLines = out_scratch + 'upLines'
 
    # Load point(s) as facilities into service layer
    printMsg('Loading points into service layer...')
@@ -415,7 +418,7 @@ def GetNetworks_hw(in_Points, in_lyrUpTrace, in_hydroNet, out_Lines,
       fac0 = arcpy.mapping.ListLayers(in_upTrace, "Facilities")[0]
    else:
       fac0 = in_upTrace.listLayers("Facilities")[0]
-   joinPt = arcpy.CopyFeatures_management(fac0, out_Scratch + os.sep + "in_Points")
+   joinPt = arcpy.CopyFeatures_management(fac0, out_scratch + "in_Points")
    arcpy.AddField_management(joinPt, ptid_join, "LONG")
    arcpy.CalculateField_management(joinPt, ptid_join, "!Name!", "PYTHON")
 
@@ -481,12 +484,12 @@ def main():
    dams = False  # whether to include dams as barriers or not
 
    # distances to loop over, in KM
-   kms = [2, 3, 5, 10, 540]
+   kms = [[2, '2km'], [3, '3km'], [5, '5km'], [10, '10km'], [1000, 'fullWs']]
 
    # loop over distances
    for km in kms:
-      up_Dist = km * 1000
-      out_Lines = 'hw_Flowline_' + str(km) + 'km'
+      up_Dist = km[0] * 1000
+      out_Lines = 'hw_Flowline_' + km[1]
       in_lyrUpTrace = MakeServiceLayer_hw(in_hydroNet, up_Dist, dams)
       GetNetworks_hw(in_Points, in_lyrUpTrace, in_hydroNet, out_Lines, in_Catchment)
 
