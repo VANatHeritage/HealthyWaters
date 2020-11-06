@@ -2,7 +2,7 @@
 # prioritizeHW.py
 # Version: ArcPro / Python 3+
 # Creation Date: 2020-07-06
-# Last Edit: 2020-07-29
+# Last Edit: 2020-11-06
 # Creator: Kirsten R. Hazler
 #
 # Summary: Functions for a watershed approach to prioritizing lands for conservation or restoration, with the purpose of maintaining documented "Healthy Waters", as well as for the ConservationVision Watershed Model.
@@ -14,6 +14,8 @@
 # - Predicting soil erosion by water: a guide to conservation planning with the revised universal soil loss equation (RUSLE) (USDA Agriculture Handbook 703; 1997)
 
 # NOTE: Landcover used in these functions should be a hybrid NLCD/CCAP product. Where CCAP is coded 19 (unconsolidated shore), the NLCD data should be recoded from code 31 (barren land) to code 32.
+
+# NOTE: To set up inputs/outputs and string a series of functions together, use a separate workflow script that imports the functions from this one.
 # ---------------------------------------------------------------------------
 
 # Import modules
@@ -21,8 +23,9 @@ import HelperPro
 from HelperPro import *
 
 def calcDW_PopServed():
-   '''Calculates an estimate of the population served 
+   '''Calculates an estimate of the population served by drinking water intakes
    '''
+   print("Nothing to see here yet, if ever.")
 
 def makeLandcoverMasks(in_LC, out_GDB):
    '''From input land NLCD landcover, creates three processing masks: one for conservation, one for restoration, and one for stormwater management.
@@ -461,101 +464,4 @@ def calcPriorityScores(in_ImpactScore, in_ConsMask, in_RestMask, in_MgmtMask, ou
    mgmt.save(mPrior)
    
    print("Mission accomplished.")
-   return (cons, rest, mgmt)
-
-def main():
-   ### Inputs/Outputs
-   outGDB = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200722.gdb" # I change this frequently 
-   karstGDB = r"E:\SpatialData\HealthyWatersWork\karstProc_2020716.gdb"
-   
-   # Masks and bounding polygons
-   BoundPoly = r" E:\SpatialData\HealthyWatersWork\HW_templateRaster_Feature\HW_templateFeature.shp"
-   MaskNoWater = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200710.gdb\mskNoWater_2016"
-   consMask = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200716.gdb\consMask"
-   restMask = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200716.gdb\restMask"
-   mgmtMask = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200716.gdb\mgmtMask"
-   
-   # Soil Sensitivity Score Inputs/Outputs
-   runoffVol_bare = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200710.gdb\runoffVol_bare"
-   soilLoss_bare = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200710.gdb\rusleRKSC_bare"
-   runoffVol_dfor = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200710.gdb\runoffVol_dfor"
-   soilLoss_dfor = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200710.gdb\rusleRKSC_dfor"
-   runoffVol = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200710.gdb\runoffVol_2016"
-   soilLoss = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200710.gdb\RKSC_2016"
-   SoilSensScore = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200716.gdb\soilSens_Score_bare"
-   
-   # Landscape Position Score Inputs/outputs
-   FlowLines = r"E:\DavidData\From_David\VA_HydroNetHR.gdb\HydroNet\NHDFlowline"
-   Catchments = r"E:\DavidData\From_David\VA_HydroNetHR.gdb\NHDPlusCatchment"
-   FlowLength = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200710.gdb\overlandFlowLength"
-   Headwaters = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200716.gdb\Hdwtrs"
-   FlowScore = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200716.gdb\FlowScore"
-   KarstPolys = r"E:\SpatialData\ConsVision_Wtrshd_2017\Karst_proc_20170125\Karst_proc.gdb\dmme_Sinkholes"
-   KarstPoints = r"E:\SpatialData\ConsVision_Wtrshd_2017\Karst_proc_20170125\Karst_proc.gdb\sink_Points"
-   KarstScore = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200716.gdb\KarstScore"
-   LandscapeScore = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\LandscapeScore"
-   
-   # Impact Inputs/Outputs
-   hwResourceAreas = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\hwResourceAreas"
-   hwRA10k = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\hwResourceAreas_10km"
-   hwRA5k = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\hwResourceAreas_5km"
-   hwRA3k = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\hwResourceAreas_3km"
-   hwRA2k = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\hwResourceAreas_2km"
-   hwResourceScore = outGDB + os.sep + "hwResourceScore"
-   hwResourceScore10k = outGDB + os.sep + "hwResourceScore10k"
-   hwResourceScore5k = outGDB + os.sep + "hwResourceScore5k"
-   hwResourceScore3k = outGDB + os.sep + "hwResourceScore3k"
-   hwResourceScore2k = outGDB + os.sep + "hwResourceScore2k"
-   hwResourceScoreCombo = outGDB + os.sep + "hwResourceScoreCombo"
-   hwResourceScore10kCombo = outGDB + os.sep + "hwResourceScore10kCombo"
-   ImpactScore_base = outGDB + os.sep + "ImpactScore_base"
-   ImpactScore_hw = outGDB + os.sep + "ImpactScore_hw"
-   ImpactScore_hw2k = outGDB + os.sep + "ImpactScore_hw2k"
-   ImpactScore_hw10k = outGDB + os.sep + "ImpactScore_hw10k"
-   ImpactScore_hwCombo = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\ImpactScore_hwCombo"
-   ImpactScore_hw10kCombo = r"E:\SpatialData\HealthyWatersWork\hwProducts_20200721.gdb\ImpactScore_hw10kCombo"
-   
-   ### Specify function(s) to run
-   # Create the specified outGDB if it doesn't already exist
-   createFGDB(outGDB) 
-   
-   # # Create additional processing masks
-   # (consMask, restMask, mgmtMask) = makeLandcoverMasks(MaskNoWater, outGDB)
-   
-   # # Get Soil Sensitivity Score
-   # calcSoilSensScore(soilLoss_bare, runoffVol_bare, outGDB, "bare", MaskNoWater)
-   
-   # # Get Landscape Position Score
-   # makeHdwtrsIndicator(FlowLines, Catchments, BoundPoly, MaskNoWater, Headwaters)
-   # calcFlowScore(FlowLength, FlowScore, Headwaters)
-   # calcKarstScore(KarstPolys, MaskNoWater, KarstScore, KarstPoints, karstGDB)
-   # calcLandscapeScore(FlowScore, KarstScore, LandscapeScore)
-   
-   # Get Impact, Importance, and Priority Scores
-   # in_raList = [(hwResourceAreas,1)]
-   # calcImportanceScore(in_raList, MaskNoWater, hwResourceScore)
-   # calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_base, "NONE")
-   # calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hw, hwResourceScore)
-   
-   # list2k = [(hwRA2k,1)]
-   # calcImportanceScore(list2k, MaskNoWater, hwResourceScore2k)
-   # calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hw2k, hwResourceScore2k)
-   
-   # list10k = [(hwRA10k,1)]
-   # calcImportanceScore(list10k, MaskNoWater, hwResourceScore10k)
-   # calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hw10k, hwResourceScore10k)
-   
-   # listCombo = [(hwRA2k,1),(hwRA3k,1),(hwRA5k,1),(hwRA10k,1),(hwResourceAreas,1)]
-   # calcImportanceScore(listCombo, MaskNoWater, hwResourceScoreCombo)
-   # calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hwCombo, hwResourceScoreCombo)
-   
-   # list10kCombo = [(hwRA2k,1),(hwRA3k,1),(hwRA5k,1),(hwRA10k,1)]
-   # calcImportanceScore(list10kCombo, MaskNoWater, hwResourceScore10kCombo)
-   # calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hw10kCombo, hwResourceScore10kCombo)
-   
-   # calcPriorityScores(ImpactScore_hwCombo, consMask, restMask, mgmtMask, outGDB, "SLICE", 10, "hwCombo")
-   # calcPriorityScores(ImpactScore_hw10kCombo, consMask, restMask, mgmtMask, outGDB, "SLICE", 10, "hw10kCombo")
-   
-if __name__ == '__main__':
-   main()  
-   
+   return (cons, rest, mgmt)  

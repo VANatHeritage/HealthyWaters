@@ -2,7 +2,7 @@
 # HelperPro.py
 # Version: ArcPro / Python 3+
 # Creation Date: 2020-07-06
-# Last Edit: 2020-07-10
+# Last Edit: 2020-11-06
 # Creator:  Kirsten R. Hazler
 
 # Summary:
@@ -664,28 +664,15 @@ def PolyToRaster(in_Poly, in_Fld, in_Snap, out_Rast):
    # Specify scratch location
    scratchGDB = arcpy.env.scratchGDB
    
-   # Get output coordinate system and set environment variables
-   srRast = arcpy.Describe(in_Snap).spatialReference
+   # Set some output and environment variables
+   out_Poly = scratchGDB + os.sep + "polyPrj"
    arcpy.env.snapRaster = in_Snap
    arcpy.env.extent = in_Snap
    arcpy.env.mask = in_Snap
    
-   # Project polygons, if necessary
-   srPoly = arcpy.Describe(in_Poly).spatialReference
-   if srRast.Name != srPoly.Name:
-      print("Reprojecting polygons to match snap raster...")
-      if srRast.GCS.Name == srPoly.GCS.Name:
-         geoTrans = ""
-         print("No geographic transformation needed...")
-      else:
-         transList = arcpy.ListTransformations(srPoly,srRast)
-         geoTrans = transList[0]
-      out_Poly = scratchGDB + os.sep + "polyPrj"
-      arcpy.Project_management(in_Poly, out_Poly, srRast, geoTrans)
-   else:
-      print("No need for reprojection.")
-      out_Poly = in_Poly
-   
+   # Re-project polygons, if necessary
+   out_Poly = ProjectToMatch_vec(in_Poly, in_Snap, out_Poly, copy = 0)
+      
    # Convert to raster
    print("Rasterizing polygons...")
    arcpy.PolygonToRaster_conversion (out_Poly, in_Fld, out_Rast, "MAXIMUM_COMBINED_AREA", 'None', in_Snap)
