@@ -433,12 +433,14 @@ def createFGDB(FGDB):
 def CompareSpatialRef(in_Data, in_Template):
    sr_In = arcpy.Describe(in_Data).spatialReference
    sr_Out = arcpy.Describe(in_Template).spatialReference
-   srString_In = sr_In.exporttostring()
-   srString_Out = sr_Out.exporttostring()
-   gcsString_In = sr_In.GCS.exporttostring()
-   gcsString_Out = sr_Out.GCS.exporttostring()
+   srFacCode_In = sr_In.factoryCode
+   # print("Input factory code: %s"%srFacCode_In)
+   srFacCode_Out = sr_Out.factoryCode
+   # print("Template factory code: %s"%srFacCode_Out)
+   gcsFacCode_In = sr_In.GCS.factoryCode
+   gcsFacCode_Out = sr_Out.GCS.factoryCode
     
-   if srString_In == srString_Out:
+   if srFacCode_In == srFacCode_Out:
       reproject = 0
       transform = 0
       geoTrans = ""
@@ -446,7 +448,7 @@ def CompareSpatialRef(in_Data, in_Template):
       reproject = 1
       
    if reproject == 1:
-      if gcsString_In == gcsString_Out:
+      if gcsFacCode_In == gcsFacCode_Out:
          transform = 0
          geoTrans = ""
       else:
