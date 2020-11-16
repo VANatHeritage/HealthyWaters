@@ -2,7 +2,7 @@
 # prioritizeHW.py
 # Version: ArcPro / Python 3+
 # Creation Date: 2020-07-06
-# Last Edit: 2020-11-06
+# Last Edit: 2020-11-13
 # Creator: Kirsten R. Hazler
 #
 # Summary: Functions for a watershed approach to prioritizing lands for conservation or restoration, with the purpose of maintaining documented "Healthy Waters", as well as for the ConservationVision Watershed Model.
@@ -202,76 +202,118 @@ def calcFlowScore(in_FlowLength, out_FlowScore, in_Hdwtrs = "NONE", minDist = 50
    
    return finScore
 
-def calcKarstScore(in_KarstPolys, in_Mask, out_KarstScore, in_KarstPoints = "NONE", scratchGDB = arcpy.env.scratchGDB):
-   '''Creates a "Karst Score" raster, representing prevalence of karst as a score from 0 (no karst nearby) to 100.
+def calcSinkScore(in_SinkPolys, fld_Area, procMask, clipMask, out_GDB, searchRadius = 10000):
+   '''From input sinkhole polygons, generates three outputs:
+   - A point feature class containing sinkhole centroids
+   - A raster representing sinkhole density
+   - A raster representing sinkhole scores from 0 to 100, derived from sinkhole density
    
      Parameters:
-   - in_KarstPolys: Polygons representing sinkhole features
-   - in_Mask: Mask raster used to define the processing area, cell size, and alignment
-   - out_KarstScore: Output raster with scores ranging from 0 to 100
-   - in_KarstPoints: Points within sinkhole polygons. These should have been previously generated from the polygon features (see tech report for Watershed Model 2017 edition.) May be omitted for a simpler karst score based only on distance.
-   - scratchGDB: An optional geodatabase for storing intermediate products
+   - in_SinkPolys: Input polygons representing sinkhole features
+   - fld_Area: Field representing the sinkhole area; used for "population" in kernel density calculation
+   - procMask: Mask raster used to define the processing area, cell size, and alignment
+   - clipMask: Mask raster used to define final output area
+   - out_GDB: Geodatabase to store output products
+   - searchRadius: Search radius used to calculate kernel density
+   
+   Note: Prior to running this function, make sure the sinkhole data are "clean", i.e., no overlaps/duplicates. There must also be a field representing the sinkhole area in desired units.
    '''
-   # Create scratchGDB if needed
-   if scratchGDB != arcpy.env.scratchGDB:
-      createFGDB(scratchGDB)
    
    # Set environment variables
-   arcpy.env.mask = in_Mask
-   arcpy.env.snapRaster = in_Mask
-   arcpy.env.cellSize = in_Mask
+   arcpy.env.mask = procMask
+   arcpy.env.snapRaster = procMask
+   arcpy.env.cellSize = procMask
    
-   # Set up intermediate outputs
-   sink_KernDens = scratchGDB + os.sep + "sink_KernDens" # provide a default value if unspecified
-   sink_DensityScore = scratchGDB + os.sep + "sink_DensityScore"
-   sink_Raster = scratchGDB + os.sep + "sink_Raster"
-   sink_EucDist = scratchGDB + os.sep + "sink_EucDist" 
-   sink_DistanceScore = scratchGDB + os.sep + "sink_DistanceScore" 
+   # Set up outputs
+   sinkPoints = out_GDB + os.sep + "sinkPoints"
+   sinkPoints_prj = out_GDB + os.sep + "sinkPoints_prj"
+   sinkDens = out_GDB + os.sep + "sinkDens"
+   sinkScore = out_GDB + os.sep + "SinkScore"
+   
+   # Generate sinkhole centroids
+   print("Generating sinkhole centroids...")
+   arcpy.FeatureToPoint_management(in_SinkPolys, sinkPoints)
+   
+   # Run kernel density
+   print("Calculating kernel density...")
+   pts = ProjectToMatch_vec(sinkPoints, procMask, sinkPoints_prj, copy = 0)
+   kdens = KernelDensity(pts, fld_Area, procMask, searchRadius, ", "DENSITIES", "PLANAR")
+   print("Saving...")
+   kdens.save(sinkDens)
+   
+   # Convert kernel density to score
+   print("Calculating truncation values...")
+   msk = Con(kdens > 0, 1)
+   (TruncMin, TruncMax) = getTruncVals(kdens, msk)
+   Fx = TfLinear ("", "", 0, 0, TruncMax, 100) 
+   print("Converting kernel density to scores...")
+   arcpy.env.mask = clipMask
+   Score = RescaleByFunction(kdens, Fx, 0, 100)
+   # print("Saving...")
+   Score.save(sinkScore)
+    
+   return Score
+   
+   print("Mission accomplished.")
 
-   # Convert sink features to raster
-   print("Converting sink features to raster...")
-   PolyToRaster(in_KarstPolys, "OBJECTID", in_Mask, sink_Raster)
+def calcKarstScore(in_KarstPolys, procMask, clipMask, out_GDB, minDist = 500, maxDist = 10000, in_SinkScore = "NONE"):
+   '''From karst polygons and an optional sinkhole score raster, generates three or four outputs:
+   - A raster representing karst polygons
+   - A raster representing distance to karst
+   - A raster representing distance scores from 0 to 100 (omitted if no density score raster is used)
+   - A raster representing the final karst score from 0 to 100 
+   
+   Parameters:
+   - in_KarstPolys: Polygons representing karst geology
+   - procMask: Mask raster used to define the processing area, cell size, and alignment
+   - clipMask: Mask raster used to define final output area
+   - out_GDB: Geodatabase to store output products
+   - minDist: Minimum distance to karst, below which the score is 100
+   - maxDist: Maximum distance to karst, above which the score is 0
+   - in_SinkScore: Input raster representing a score from 0 to 100 based on density of sinkhole features. May be omitted for a simpler karst score based only on distance to karst geology.
+   '''
+
+   # Set environment variables
+   arcpy.env.mask = procMask
+   arcpy.env.snapRaster = procMask
+   arcpy.env.cellSize = procMask
+   
+   # Set up outputs
+   karst_Raster = out_GDB + os.sep + "karst_Raster"
+   karst_eDist = out_GDB + os.sep + "karst_eDist" 
+   karst_distScore = out_GDB + os.sep + "karst_distScore" 
+   karst_Score = out_GDB + os.sep + "Karst_Score" 
+
+   # Convert karst polygons to raster
+   print("Converting karst polygons to raster...")
+   PolyToRaster(in_KarstPolys, "OBJECTID", procMask, karst_Raster)
 
    # Get Euclidean Distance and Distance Score
-   print("Getting Euclidean distance to sinks...")
-   edist = EucDistance(sink_Raster, "", arcpy.env.cellSize)
+   print("Getting Euclidean distance to karst...")
+   edist = EucDistance(karst_Raster, "", arcpy.env.cellSize)
    print("Saving...")
-   edist.save(sink_EucDist)
+   edist.save(karst_eDist)
    print("Converting distances to scores...")
-   minDist = 500
-   maxDist = 10000
+   arcpy.env.mask = clipMask
    Fx = TfLinear ("", "", minDist, 100, maxDist, 0) 
    edistScore = RescaleByFunction(edist, Fx, 100, 0)
  
-   if in_KarstPoints != "NONE":
+   if in_SinkScore != "NONE":
       print("Saving...")
-      edistScore.save(sink_DistanceScore)
-      # Get Kernel Density and Density Score
-      print("Getting kernel density of sink points...")
-      searchRadius = 10000
-      popFld = "NONE"
-      kdens = KernelDensity(in_KarstPoints, popFld, in_Mask, searchRadius, "SQUARE_KILOMETERS", "DENSITIES", "PLANAR")
-      print("Saving...")
-      kdens.save(sink_KernDens)
-      print("Converting densities to scores...")
-      minDens = 0
-      maxDens = 250
-      Fx = TfLinear ("", "", minDens, 0, maxDens, 100) 
-      kdensScore = RescaleByFunction(kdens, Fx, 0, 100)
-      print("Saving...")
-      kdensScore.save(sink_DensityScore)
+      edistScore.save(karst_distScore)
 
       # Get final Karst Score
-      print("Calculating final Karst Score...")
-      combinedScore = CellStatistics([kdensScore, edistScore], "MEAN", "DATA")
+      print("Calculating final Karst Score from distance and density scores...")
+      combinedScore = CellStatistics([in_SinkScore, edistScore], "MEAN", "DATA")
       print("Saving...")
-      combinedScore.save(out_KarstScore)
+      combinedScore.save(karst_Score)
       return combinedScore
    
    else:
       print("Karst score is based only on Euclidean distance. Saving...")
-      edistScore.save(out_KarstScore)
+      edistScore.save(karst_Score)
       return edistScore
+   print("Mission accomplished.")
 
 def calcLandscapeScore(in_FlowScore, in_KarstScore, out_LandscapeScore):
    '''Creates a "Landscape Position Score" raster, representing relative importance to stream health based on position in the landscape. It is the maximum of the Karst Score and the Flow Distance Score.

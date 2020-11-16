@@ -2,13 +2,13 @@
 # workflow_HW.py
 # Version: ArcPro / Python 3+
 # Creation Date: 2020-07-06
-# Last Edit: 2020-11-06
+# Last Edit: 2020-11-13
 # Creator: Kirsten R. Hazler
 #
 # Summary: 
 # This sets up Watershed Model and Healthy Waters prioritization processing and serves as a record of inputs and outputs
 
-# NOTE (11/6/2020): Old karst data were used in this run. Functions using karst data will need to be run with the updated data. This has not yet been done. Dave Boyd is checking with DMME to make sure the dataset is correct, since there is an obvious shift between old and new.
+# NOTE (11/6/2020): Old karst data were used in the July run. Functions using karst data will need to be run with the updated data. This has not yet been done. Dave Boyd is checking with DMME to make sure the dataset is correct, since there is an obvious shift between old and new.
 # ---------------------------------------------------------------------------
 
 # Import modules
@@ -16,11 +16,12 @@ import prioritizeHW
 from prioritizeHW import *
 
 ### Inputs/Outputs
-outGDB = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200722.gdb" # I change this frequently as I proceed with running lines of code
-karstGDB = r"Y:\SpatialData\HealthyWatersWork\karstProc_2020716.gdb"
+outGDB = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20201113.gdb" # I change this frequently as I proceed with running lines of code
+karstGDB = r"Y:\SpatialData\HealthyWatersWork\karstProc_20200716.gdb"
 
 # Masks and bounding polygons
 BoundPoly = r"Y:\SpatialData\HealthyWatersWork\HW_templateRaster_Feature\HW_templateFeature.shp"
+procMask = r"Y:\SpatialData\SnapMasks\procMask50_conus.tif"
 MaskNoWater = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200710.gdb\mskNoWater_2016"
 consMask = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200716.gdb\consMask"
 restMask = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200716.gdb\restMask"
@@ -41,9 +42,10 @@ Catchments = r"Y:\DavidData\From_David\VA_HydroNetHR.gdb\NHDPlusCatchment"
 FlowLength = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200710.gdb\overlandFlowLength"
 Headwaters = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200716.gdb\Hdwtrs"
 FlowScore = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200716.gdb\FlowScore"
-KarstPolys = r"Y:\SpatialData\ConsVision_Wtrshd_2017\Karst_proc_20170125\Karst_proc.gdb\dmme_Sinkholes"
-KarstPoints = r"Y:\SpatialData\ConsVision_Wtrshd_2017\Karst_proc_20170125\Karst_proc.gdb\sink_Points"
-KarstScore = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200716.gdb\KarstScore"
+KarstPolys = r"Y:\SpatialData\USGS\USKarstMap\USKarstMap.gdb\Contiguous48\Carbonates48"
+SinkPolys = r"Y:\SpatialData\DMME\Sinkholes_VaDMME_2020SeptCurrent\Sinkholes_VaDMME.shp"
+SinkScore = outGDB + os.sep + "SinkScore"
+KarstScore = outGDB + os.sep + "KarstScore"
 LandscapeScore = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\LandscapeScore"
 
 # Impact Inputs/Outputs
@@ -57,10 +59,10 @@ hwResourceScore10k = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\
 hwResourceScore2k = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\hwResourceScore2k"
 hwResourceScoreCombo = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\hwResourceScoreCombo"
 hwResourceScore10kCombo = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200721.gdb\hwResourceScore10kCombo"
-ImpactScore_base = outGDB + os.sep + "ImpactScore_base"
-ImpactScore_hw = outGDB + os.sep + "ImpactScore_hw"
-ImpactScore_hw2k = outGDB + os.sep + "ImpactScore_hw2k"
-ImpactScore_hw10k = outGDB + os.sep + "ImpactScore_hw10k"
+ImpactScore_base = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\ImpactScore_base"
+ImpactScore_hw = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\ImpactScore_hw"
+ImpactScore_hw2k = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\ImpactScore_hw2k"
+ImpactScore_hw10k = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\ImpactScore_hw10k"
 ImpactScore_hwCombo = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\ImpactScore_hwCombo"
 ImpactScore_hw10kCombo = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200721.gdb\ImpactScore_hw10kCombo"
 
@@ -78,7 +80,9 @@ createFGDB(outGDB)
 # makeHdwtrsIndicator(FlowLines, Catchments, BoundPoly, MaskNoWater, Headwaters)
 # calcFlowScore(FlowLength, FlowScore, Headwaters)
 # calcKarstScore(KarstPolys, MaskNoWater, KarstScore, KarstPoints, karstGDB)
-# calcLandscapeScore(FlowScore, KarstScore, LandscapeScore)
+calcSinkScore(SinkPolys, "SqMeters", procMask, MaskNoWater, outGDB, searchRadius = 10000)
+calcKarstScore(KarstPolys, procMask, MaskNoWater, out_GDB, minDist = 500, maxDist = 10000, SinkScore)
+calcLandscapeScore(FlowScore, KarstScore, LandscapeScore)
 
 # Get Impact, Importance, and Priority Scores
 # in_raList = [(hwResourceAreas,1)]
