@@ -2,7 +2,7 @@
 # prioritizeHW.py
 # Version: ArcPro / Python 3+
 # Creation Date: 2020-07-06
-# Last Edit: 2020-11-13
+# Last Edit: 2020-11-17
 # Creator: Kirsten R. Hazler
 #
 # Summary: Functions for a watershed approach to prioritizing lands for conservation or restoration, with the purpose of maintaining documented "Healthy Waters", as well as for the ConservationVision Watershed Model.
@@ -64,10 +64,16 @@ def getTruncVals(in_Raster, in_Mask = "NONE", numSD = 3):
    numSD: The number of standard deviations used to determine the cutoff values
    '''
    
-   if in_Mask == "NONE":
-      r = Raster(in_Raster)
-   else:
+   # if in_Mask == "NONE":
+      # r = Raster(in_Raster)
+   # else:
+      # r = Con(Raster(in_Mask), Raster(in_Raster))
+   
+   try:
       r = Con(Raster(in_Mask), Raster(in_Raster))
+   except:
+      r = Raster(in_Raster)
+
    rMin = r.minimum
    rMax = r.maximum
    rMean = r.mean
@@ -202,7 +208,7 @@ def calcFlowScore(in_FlowLength, out_FlowScore, in_Hdwtrs = "NONE", minDist = 50
    
    return finScore
 
-def calcSinkScore(in_SinkPolys, fld_Area, procMask, clipMask, out_GDB, searchRadius = 10000):
+def calcSinkScore(in_SinkPolys, fld_Area, procMask, clipMask, out_GDB, searchRadius = 5000):
    '''From input sinkhole polygons, generates three outputs:
    - A point feature class containing sinkhole centroids
    - A raster representing sinkhole density
@@ -221,6 +227,7 @@ def calcSinkScore(in_SinkPolys, fld_Area, procMask, clipMask, out_GDB, searchRad
    
    # Set environment variables
    arcpy.env.mask = procMask
+   arcpy.env.extent = procMask
    arcpy.env.snapRaster = procMask
    arcpy.env.cellSize = procMask
    
@@ -228,7 +235,7 @@ def calcSinkScore(in_SinkPolys, fld_Area, procMask, clipMask, out_GDB, searchRad
    sinkPoints = out_GDB + os.sep + "sinkPoints"
    sinkPoints_prj = out_GDB + os.sep + "sinkPoints_prj"
    sinkDens = out_GDB + os.sep + "sinkDens"
-   sinkScore = out_GDB + os.sep + "SinkScore"
+   sinkScore = out_GDB + os.sep + "sinkScore"
    
    # Generate sinkhole centroids
    print("Generating sinkhole centroids...")
@@ -237,7 +244,7 @@ def calcSinkScore(in_SinkPolys, fld_Area, procMask, clipMask, out_GDB, searchRad
    # Run kernel density
    print("Calculating kernel density...")
    pts = ProjectToMatch_vec(sinkPoints, procMask, sinkPoints_prj, copy = 0)
-   kdens = KernelDensity(pts, fld_Area, procMask, searchRadius, ", "DENSITIES", "PLANAR")
+   kdens = KernelDensity(pts, fld_Area, procMask, searchRadius, "HECTARES", "DENSITIES", "PLANAR")
    print("Saving...")
    kdens.save(sinkDens)
    
@@ -245,10 +252,12 @@ def calcSinkScore(in_SinkPolys, fld_Area, procMask, clipMask, out_GDB, searchRad
    print("Calculating truncation values...")
    msk = Con(kdens > 0, 1)
    (TruncMin, TruncMax) = getTruncVals(kdens, msk)
-   Fx = TfLinear ("", "", 0, 0, TruncMax, 100) 
+   TruncMax = int(TruncMax)
+   Fx = TfLinear ("", "", 0, 0, TruncMax, 100)
+   print("Truncation values set to 0, %s." %TruncMax)
    print("Converting kernel density to scores...")
    arcpy.env.mask = clipMask
-   Score = RescaleByFunction(kdens, Fx, 0, 100)
+   Score = RescaleByFunction(sinkDens, Fx, 0, 100)
    # print("Saving...")
    Score.save(sinkScore)
     
@@ -256,7 +265,7 @@ def calcSinkScore(in_SinkPolys, fld_Area, procMask, clipMask, out_GDB, searchRad
    
    print("Mission accomplished.")
 
-def calcKarstScore(in_KarstPolys, procMask, clipMask, out_GDB, minDist = 500, maxDist = 10000, in_SinkScore = "NONE"):
+def calcKarstScore(in_KarstPolys, procMask, clipMask, out_GDB, in_SinkScore, minDist = 100, maxDist = 5000):
    '''From karst polygons and an optional sinkhole score raster, generates three or four outputs:
    - A raster representing karst polygons
    - A raster representing distance to karst
@@ -268,9 +277,12 @@ def calcKarstScore(in_KarstPolys, procMask, clipMask, out_GDB, minDist = 500, ma
    - procMask: Mask raster used to define the processing area, cell size, and alignment
    - clipMask: Mask raster used to define final output area
    - out_GDB: Geodatabase to store output products
+   - in_SinkScore: Input raster representing a score from 0 to 100 based on density of sinkhole features. May be omitted (set to "NONE") for a simpler karst score based only on distance to karst geology.
    - minDist: Minimum distance to karst, below which the score is 100
    - maxDist: Maximum distance to karst, above which the score is 0
-   - in_SinkScore: Input raster representing a score from 0 to 100 based on density of sinkhole features. May be omitted for a simpler karst score based only on distance to karst geology.
+   
+   Justification for minDist and maxDist default values:
+   I calculated distance between sinkhole centroids and karst polygons. 97.3% of points were within 100 m of polygons. Only one point was greater than 5000 m from a polygon; the distance for that point was ~5200 m.
    '''
 
    # Set environment variables
@@ -282,7 +294,7 @@ def calcKarstScore(in_KarstPolys, procMask, clipMask, out_GDB, minDist = 500, ma
    karst_Raster = out_GDB + os.sep + "karst_Raster"
    karst_eDist = out_GDB + os.sep + "karst_eDist" 
    karst_distScore = out_GDB + os.sep + "karst_distScore" 
-   karst_Score = out_GDB + os.sep + "Karst_Score" 
+   karst_Score = out_GDB + os.sep + "KarstScore" 
 
    # Convert karst polygons to raster
    print("Converting karst polygons to raster...")
@@ -296,7 +308,7 @@ def calcKarstScore(in_KarstPolys, procMask, clipMask, out_GDB, minDist = 500, ma
    print("Converting distances to scores...")
    arcpy.env.mask = clipMask
    Fx = TfLinear ("", "", minDist, 100, maxDist, 0) 
-   edistScore = RescaleByFunction(edist, Fx, 100, 0)
+   edistScore = RescaleByFunction(karst_eDist, Fx, 100, 0)
  
    if in_SinkScore != "NONE":
       print("Saving...")
@@ -315,23 +327,41 @@ def calcKarstScore(in_KarstPolys, procMask, clipMask, out_GDB, minDist = 500, ma
       return edistScore
    print("Mission accomplished.")
 
-def calcLandscapeScore(in_FlowScore, in_KarstScore, out_LandscapeScore):
+def calcPositionScore(in_FlowScore, in_KarstScore, out_PositionScore):
    '''Creates a "Landscape Position Score" raster, representing relative importance to stream health based on position in the landscape. It is the maximum of the Karst Score and the Flow Distance Score.
 
    Parameters:
    - in_FlowScore: Input raster representing the Flow Distance Score
    - in_KarstScore: Input raster representing the Karst Score
-   - out_LandscapeScore: Output raster representing the Landscape Position Score
+   - out_PositionScore: Output raster representing the Landscape Position Score
    '''
    
    # Calculate score
    print("Calculating Landscape Position Score...")
    score = CellStatistics([in_FlowScore, in_KarstScore], "MAXIMUM", "DATA")
    print("Saving...")
-   score.save(out_LandscapeScore)
+   score.save(out_PositionScore)
    
    print("Mission accomplished.")
    return score
+
+def calcImpactScore(in_PositionScore, in_SoilSensScore, out_ImpactScore):
+   '''Creates a raster representing the potential impact, based on landscape position and soil sensitivity. 
+   
+   Parameters:
+   - in_PositionScore: Input raster representing relative importance based on landscape position
+   - in_SoilSensScore: Input raster representing relative importance based on soil sensitivity
+   - out_ImpactScore: The output raster representing either the Impact Score (if there is no input Importance Score) or the General Priority Score (if there is an input Importance Score used to adjust the Impact Score).
+   '''
+
+   print("Calculating Impact Score...")
+   score = CellStatistics([in_PositionScore, in_SoilSensScore], "MEAN", "DATA")
+      
+   print("Saving...")
+   score.save(out_ImpactScore)
+   
+   print("Mission accomplished.")
+   return out_ImpactScore
    
 def calcImportanceScore(in_raList, in_Snap, out_Raster):
    '''Calculates an Importance Score, based on polygon features identifying areas impacting resources of interest (e.g., catchments for Healthy Waters sites, assessment zones for drinking water intakes, or a Stream Conservation Site delineation).
@@ -396,29 +426,6 @@ def calcImportanceScore(in_raList, in_Snap, out_Raster):
    print("Mission complete.")
    return out_Raster
 
-def calcImpactScore(in_LandscapeScore, in_SoilSensScore, out_Raster, in_ImportanceScore = "NONE"):
-   '''Creates a raster representing Impact Importance Score, based on landscape position and soil sensitivity, and optionally weighted by a score based on downstream resources of interest that would potentially be impacted. 
-   
-   Parameters:
-   - in_LandscapeScore: Input raster representing relative importance based on landscape position
-   - in_SoilSensScore: Input raster representing relative importance based on soil sensitivity
-   - out_Raster: The output raster representing either the Impact Score (if there is no input Importance Score) or the General Priority Score (if there is an input Importance Score used to adjust the Impact Score).
-   - in_ImportanceScore: Input raster representing relative importance based on the number of resources of interest that could be impacted by changes at each location
-   '''
-   
-   if in_ImportanceScore != "NONE":
-      print("Calculating General Priority Score...")
-      score = Raster(in_ImportanceScore)/100.0 * (CellStatistics([in_LandscapeScore, in_SoilSensScore], "MEAN", "DATA"))
-   else:
-      print("Calculating Impact Score"...")
-      score = CellStatistics([in_LandscapeScore, in_SoilSensScore], "MEAN", "DATA")
-      
-   print("Saving...")
-   score.save(out_Raster)
-   
-   print("Mission accomplished.")
-   return out_Raster
-
 def ScenarioScore(in_Case, in_WorstCase, in_BestCase, priorType, out_Score, in_Mask = "NONE"):
    '''Creates a raster representing a "Scenario Score", depending on how the values in the input raster compare to best- and worst-case scenarios for the same variable. 
    
@@ -453,44 +460,58 @@ def ScenarioScore(in_Case, in_WorstCase, in_BestCase, priorType, out_Score, in_M
    adjScore = Con(score > 100, 100, Con(score < 0, 0, score))
    adjScore.save(out_Score)
 
-def calcPriorityScores(in_ImpactScore, in_ConsMask, in_RestMask, in_MgmtMask, out_GDB, rescale = "SLICE", slice = 10, nameTag = ""):
+def calcPriorityScores(in_ImpactScore, in_ImportanceScore, in_ConsMask, in_RestMask, in_MgmtMask, out_GDB, rescale = "SLICE", slice = 10, nameTag = "NONE"):
    '''Calculates priorities for conservation, restoration, and stormwater management, depending on landcover type.
    
    Parameters:
-   - in_ImpactScore: Input raster representing potential impact (x importance)
+   - in_ImpactScore: Input raster representing potential impact
+   - in_ImportanceScore: Input raster representing relative importance based on the number of resources of interest that could be impacted by changes at each location. Alternatively, enter 1 to apply constant importance throughout.
    - in_ConsMask: Input raster representing lands that should get conservation priorities
    - in_RestMask: Input raster representing lands that should get restoration priorities
    - in_MgmtMask: Input raster representing lands that should get stormwater management priorities
    - out_GDB: Geodatabase to hold final outputs
    - rescale: Indicates whether to first rescale the Impact Score raster. Options: "SLICE" (to slice into specified number of quantiles), "STANDARD" (to do a standard linear rescale), or "NONE" (to use the raw impact scores).
    - slice: If the SLICE option is used for rescaling, the number of slices (i.e, quantiles)
-   - nameTag: String to add as a suffix to standard output names
+   - nameTag: String to add as a suffix to standard output names. Set to "NONE" if no suffix is desired.
    '''
    
    # Set up outputs
-   cPrior = out_GDB + os.sep + "consPriority_%s"%nameTag
-   rPrior = out_GDB + os.sep + "restPriority_%s"%nameTag
-   mPrior = out_GDB + os.sep + "mgmtPriority_%s"%nameTag
-   bName = os.path.basename(in_ImpactScore)
+   gPrior = out_GDB + os.sep + "genPriority"
+   cPrior = out_GDB + os.sep + "consPriority"
+   rPrior = out_GDB + os.sep + "restPriority"
+   mPrior = out_GDB + os.sep + "mgmtPriority"
    
-   # Rescale the impact scores, if specified
+   if nameTag != "NONE":
+      for p in [gPrior, cPrior, rPrior, mPrior]:
+         p = p + "_%s" %nameTag
+   #bName = os.path.basename(in_ImpactScore)
+   
+   # Calculate the general priority score
+   print("Calculating General Priority Score...")
+   if in_ImportanceScore == 1:
+      p_Score = Raster(in_ImpactScore)
+   else:
+      p_Score = Raster(in_ImportanceScore)/100.0 * Raster(in_ImpactScore)
+      p_Score.save(gPrior)
+   
+   # Rescale the general priority scores, if specified
    if rescale == "SLICE":
-      print("Slicing impact scores into quantiles...")
-      score = Slice(in_ImpactScore, slice, "EQUAL_AREA", 1)
-      outPath = out_GDB + os.sep + bname + "_slice"
+      print("Slicing priority scores into quantiles...")
+      score = Slice(p_Score, slice, "EQUAL_AREA", 1)
+      outPath = out_GDB + os.sep + "genPriority_slice"
       score.save(outPath)
    elif rescale == "STANDARD":
       print("Calculating minimum and maximum impact scores...")
-      r = Raster(in_ImpactScore)
+      r = p_Score
       rMin = r.minimum
       rMax = r.maximum
       print("Rescaling...")
       Fx = TfLinear ("", "", rmin, 1, rmax, 100) 
       score = RescaleByFunction(r, Fx, 1, 100)
-      outPath = out_GDB + os.sep + bname + "_rscl"
+      outPath = out_GDB + os.sep + "genPriority_rscl"
       score.save(outPath)
    else:
-      score = Raster(in_ImpactScore)
+      score = p_Score
       
    # Create priority rasters
    print("Creating conservation priority raster...")

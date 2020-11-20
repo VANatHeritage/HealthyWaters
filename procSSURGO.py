@@ -2,7 +2,7 @@
 # procSSURGO.py
 # Version: ArcPro / Python 3+
 # Creation Date: 2020-05-19
-# Last Edit: 2020-07-13
+# Last Edit: 2020-11-19
 # Creator: Kirsten R. Hazler
 #
 # Summary: Functions for processing SSURGO data and producing rasters representing soil conditions, as well as functions inspired by OpenNSPECT software to produce rasters representing interactions between soils, topography, and land cover.
@@ -305,7 +305,7 @@ def SlopeTrans(in_Raster, inputType, transType, out_Trans, out_Slope, zfactor = 
 
    Parameters:
    - in_Raster: input raster representing slope or elevation
-   - slopeType: indicates whether the input raster is slope in degrees (DEG or DEGREES), slope as percent grade (PERC or PERCENT), or elevation (ELEV or ELEVATION)
+   - inputType: indicates whether the input raster is slope in degrees (DEG or DEGREES), slope as percent grade (PERC or PERCENT), or elevation (ELEV or ELEVATION)
    - transType: the transformation function used to produce the output raster
      permitted values: TRUNCLIN, TRUNCSIN, RUSLE
    - out_Trans: output raster representing transformed slope

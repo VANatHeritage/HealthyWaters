@@ -2,7 +2,7 @@
 # workflow_HW.py
 # Version: ArcPro / Python 3+
 # Creation Date: 2020-07-06
-# Last Edit: 2020-11-13
+# Last Edit: 2020-11-17
 # Creator: Kirsten R. Hazler
 #
 # Summary: 
@@ -16,7 +16,7 @@ import prioritizeHW
 from prioritizeHW import *
 
 ### Inputs/Outputs
-outGDB = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20201113.gdb" # I change this frequently as I proceed with running lines of code
+outGDB = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20201117.gdb" # I change this frequently as I proceed with running lines of code
 karstGDB = r"Y:\SpatialData\HealthyWatersWork\karstProc_20200716.gdb"
 
 # Masks and bounding polygons
@@ -44,9 +44,9 @@ Headwaters = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200716.gdb\Hdwtrs"
 FlowScore = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200716.gdb\FlowScore"
 KarstPolys = r"Y:\SpatialData\USGS\USKarstMap\USKarstMap.gdb\Contiguous48\Carbonates48"
 SinkPolys = r"Y:\SpatialData\DMME\Sinkholes_VaDMME_2020SeptCurrent\Sinkholes_VaDMME.shp"
-SinkScore = outGDB + os.sep + "SinkScore"
+SinkScore = outGDB + os.sep + "sinkScore"
 KarstScore = outGDB + os.sep + "KarstScore"
-LandscapeScore = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\LandscapeScore"
+PositionScore = outGDB + os.sep + "PositionScore"
 
 # Impact Inputs/Outputs
 hwResourceAreas = r"Y:\SpatialData\HealthyWatersWork\hwProducts_20200720.gdb\hwResourceAreas"
@@ -80,31 +80,34 @@ createFGDB(outGDB)
 # makeHdwtrsIndicator(FlowLines, Catchments, BoundPoly, MaskNoWater, Headwaters)
 # calcFlowScore(FlowLength, FlowScore, Headwaters)
 # calcKarstScore(KarstPolys, MaskNoWater, KarstScore, KarstPoints, karstGDB)
-calcSinkScore(SinkPolys, "SqMeters", procMask, MaskNoWater, outGDB, searchRadius = 10000)
-calcKarstScore(KarstPolys, procMask, MaskNoWater, out_GDB, minDist = 500, maxDist = 10000, SinkScore)
-calcLandscapeScore(FlowScore, KarstScore, LandscapeScore)
+calcSinkScore(SinkPolys, "SqMeters", procMask, MaskNoWater, outGDB, searchRadius = 5000)
+calcKarstScore(KarstPolys, procMask, MaskNoWater, outGDB, SinkScore, minDist = 100, maxDist = 5000)
+calcPositionScore(FlowScore, KarstScore, PositionScore)
+arcpy.env.workspace = outGDB
+ras = ["SinkScore", "KarstScore", "PositionScore"]
+arcpy.BatchBuildPyramids_management(ras, "", "", "", "", "", "SKIP_EXISTING")
 
 # Get Impact, Importance, and Priority Scores
 # in_raList = [(hwResourceAreas,1)]
 # calcImportanceScore(in_raList, MaskNoWater, hwResourceScore)
-# calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_base, "NONE")
-# calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hw, hwResourceScore)
+# calcImpactScore(PositionScore, SoilSensScore, ImpactScore_base, "NONE")
+# calcImpactScore(PositionScore, SoilSensScore, ImpactScore_hw, hwResourceScore)
 
 # list2k = [(hwRA2k,1)]
 # calcImportanceScore(list2k, MaskNoWater, hwResourceScore2k)
-# calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hw2k, hwResourceScore2k)
+# calcImpactScore(PositionScore, SoilSensScore, ImpactScore_hw2k, hwResourceScore2k)
 
 # list10k = [(hwRA10k,1)]
 # calcImportanceScore(list10k, MaskNoWater, hwResourceScore10k)
-# calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hw10k, hwResourceScore10k)
+# calcImpactScore(PositionScore, SoilSensScore, ImpactScore_hw10k, hwResourceScore10k)
 
 # listCombo = [(hwRA2k,1),(hwRA3k,1),(hwRA5k,1),(hwRA10k,1),(hwResourceAreas,1)]
 # calcImportanceScore(listCombo, MaskNoWater, hwResourceScoreCombo)
-# calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hwCombo, hwResourceScoreCombo)
+# calcImpactScore(PositionScore, SoilSensScore, ImpactScore_hwCombo, hwResourceScoreCombo)
 
 # list10kCombo = [(hwRA2k,1),(hwRA3k,1),(hwRA5k,1),(hwRA10k,1)]
 # calcImportanceScore(list10kCombo, MaskNoWater, hwResourceScore10kCombo)
-# calcImpactScore(LandscapeScore, SoilSensScore, ImpactScore_hw10kCombo, hwResourceScore10kCombo)
+# calcImpactScore(PositionScore, SoilSensScore, ImpactScore_hw10kCombo, hwResourceScore10kCombo)
 
 # calcPriorityScores(ImpactScore_hwCombo, consMask, restMask, mgmtMask, outGDB, "SLICE", 10, "hwCombo")
 # calcPriorityScores(ImpactScore_hw10kCombo, consMask, restMask, mgmtMask, outGDB, "SLICE", 10, "hw10kCombo")
